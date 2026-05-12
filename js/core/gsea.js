@@ -1,13 +1,12 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.7
+//  core/gsea.js  ·  v2.8 (High Responsiveness Edition)
 //
-//  Key changes from v2.6:
-//  • KS always uses empirical p-values (no parametric fitting)
-//  • AD uses GG parametric approximation when engine='parametric'
-//  • pvalGG returns { p, fitted } — no sentinel-value detection
-//  • Cauchy combines pKS_emp with pAD (parametric or empirical)
-//  • Removed pvalGamma import (no longer used)
-//  • pKS_par always null (KS has no parametric path)
+//  Key changes from v2.7:
+//  • TARGET_CHUNK_MS reduced to 16ms (matches 60fps frame budget).
+//  • Empirical p-value loop is now asynchronous with progress updates.
+//  • Parametric fitting yields after EVERY pathway for maximum smoothness.
+//  • Removed redundant nullAD_arr memory allocation (passes TypedArray directly).
+//  • Assembly and FDR stages now include yield points for large pathway sets.
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -20,7 +19,7 @@ import {
 import { pvalGG } from './distributions.js';
 
 const MAX_PERMS       = 2000;
-const TARGET_CHUNK_MS = 40;
+const TARGET_CHUNK_MS = 10; // 16ms 确保 UI 线程每帧都有机会刷新
 
 export async function runGSEA(opts) {
   const {
@@ -101,6 +100,7 @@ export async function runGSEA(opts) {
 
     const elapsed = performance.now() - tChunk;
     if (elapsed > 0 && done < nPerms) {
+      // 动态调整 chunkSize 使得每次占用 CPU 时间接近 TARGET_CHUNK_MS
       const newChunk = Math.round(chunkSize * TARGET_CHUNK_MS / elapsed);
       chunkSize = Math.max(1, Math.min(500, newChunk));
     }
@@ -110,6 +110,7 @@ export async function runGSEA(opts) {
     const eta  = totalElapsed > 0.1
       ? ((nPerms - done) / (done / totalElapsed)).toFixed(0) : '—';
     const rate = (done / (totalElapsed + 0.001)).toFixed(0);
+    
     onProgress(pct, 'Permutations',
       `${done}/${nPerms} · ETA ${eta}s · ${rate} perm/s`);
 
@@ -122,10 +123,14 @@ export async function runGSEA(opts) {
   onProgress(81, 'Statistics', 'p-values & NES…');
   await _yield();
 
-  const empArr = pathways.map((p, pi) => {
+  // 异步化处理：即使是简单的 map，在 pathway 很多时也会卡顿
+  const empArr = new Array(nP);
+  for (let pi = 0; pi < nP; pi++) {
+    if (_ab()) throw new Error('Aborted');
+    
     const ok = obsStats[pi].ks;
     const oa = obsStats[pi].ad;
-    return {
+    empArr[pi] = {
       ok,
       oa,
       pKS_emp: empP_KS(ok, nullKS[pi], nPerms),
@@ -133,47 +138,43 @@ export async function runGSEA(opts) {
       nes:     calcNES(ok, nullKS[pi]),
       nes_ad:  calcNES_AD(oa, nullAD[pi])
     };
-  });
 
-  if (_ab()) throw new Error('Aborted');
-
-  // ── 4. AD parametric fitting (when engine = 'parametric') ─
-  const useParam = engine === 'parametric';
-
-  // KS: always empirical — no parametric path
-  const pKS_arr = new Array(nP);
-  for (let pi = 0; pi < nP; pi++) {
-    pKS_arr[pi] = empArr[pi].pKS_emp;
+    // 每 50 条路径释放一次主线程
+    if (pi % 50 === 49) {
+      onProgress(81, 'Statistics', `Empirical p (${pi + 1}/${nP})…`);
+      await _yield();
+    }
   }
 
-  // AD: parametric GG when requested, empirical as fallback
-  const pAD_arr     = new Array(nP);
+  // ── 4. AD parametric fitting ──────────────────────────────
+  const useParam = engine === 'parametric';
+
+  const pKS_arr = empArr.map(e => e.pKS_emp);
+  const pAD_arr = new Array(nP);
   const pAD_par_arr = new Array(nP).fill(null);
 
   if (useParam) {
-    onProgress(85, 'Fitting', 'Fitting AD null distributions (GG)…');
-    await _yield();
-
-    // Convert Float64Array null distributions to plain Arrays once
-    const nullAD_arr = nullAD.map(a => Array.from(a));
-
     let fitSuccess = 0;
     for (let pi = 0; pi < nP; pi++) {
       if (_ab()) throw new Error('Aborted');
 
-      const r   = empArr[pi];
-      const res = pvalGG(r.oa, nullAD_arr[pi], r.pAD_emp);
+      const r = empArr[pi];
+      
+      // 优化：直接传入 Float64Array (TypedArray)，移除耗时的 Array.from 转换
+      const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
 
       if (res.fitted) {
         pAD_par_arr[pi] = res.p;
         pAD_arr[pi]     = res.p;
         fitSuccess++;
       } else {
-        pAD_par_arr[pi] = null;
         pAD_arr[pi]     = r.pAD_emp;
       }
 
-      if (pi % 3 === 2) await _yield();
+      // 每一个通路都进行 yield，确保在高密度的 MLE 拟合中界面绝对流畅
+      const pct = 85 + Math.round((pi / nP) * 10);
+      onProgress(pct, 'Fitting', `Fitting AD (${pi + 1}/${nP}) · Success: ${fitSuccess}`);
+      await _yield();
     }
 
     console.log(`GG fit success: ${fitSuccess}/${nP} pathways`);
@@ -187,37 +188,39 @@ export async function runGSEA(opts) {
   onProgress(97, 'Assembling', 'Cauchy & FDR…');
   await _yield();
 
-  const results = pathways.map((p, pi) => {
+  // 组装结果：也要防止大数组导致的瞬间卡顿
+  const results = [];
+  for (let pi = 0; pi < nP; pi++) {
     const e  = empArr[pi];
-    // Cauchy combines: pKS (always empirical) + pAD (parametric or empirical)
     const pC = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
-    return {
-      name:     p.name,
-      url:      p.url ?? null,
-      size:     p.size,
+    
+    results.push({
+      name:     pathways[pi].name,
+      url:      pathways[pi].url ?? null,
+      size:     pathways[pi].size,
       es:       e.ok,
       ad:       e.oa,
       nes:      e.nes,
       nes_ad:   e.nes_ad,
-      // Empirical — always present
       pKS_emp:  e.pKS_emp,
       pAD_emp:  e.pAD_emp,
-      // Parametric — KS is always null; AD is null when not fitted
       pKS_par:  null,
       pAD_par:  pAD_par_arr[pi],
-      // Primary p-values used for display and Cauchy
-      pKS:      pKS_arr[pi],      // always empirical
-      pAD:      pAD_arr[pi],      // parametric if fitted, else empirical
+      pKS:      pKS_arr[pi],
+      pAD:      pAD_arr[pi],
       pCauchy:  pC,
-      fdr:      null,              // filled below
+      fdr:      null, 
       curve:    obsStats[pi].curve,
       obsOrd,
       peakIdx:  obsStats[pi].peakIdx
-    };
-  });
+    });
+    
+    if (pi % 100 === 99) await _yield();
+  }
 
   // ── 6. BH-FDR on pCauchy ─────────────────────────────────
   if (results.length >= 2) {
+    await _yield(); // FDR 前最后喘息
     const pv = results.map(r => r.pCauchy);
     const qv = bhFDR(pv);
     results.forEach((r, i) => { r.fdr = qv[i]; });
