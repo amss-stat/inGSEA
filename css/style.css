@@ -524,3 +524,40 @@ td.cpname { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted2); }
 
 @media (max-width: 820px) { :root { --lp-w: 260px; } }
+
+/* jStat status badge */
+.jstat-badge {
+  font-size: 10px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surf2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.jstat-badge.ok  { color: var(--green); border-color: #a8d5bc; background: var(--green-lt); }
+.jstat-badge.err { color: var(--amber); border-color: #f0d090; background: var(--amber-lt); }
+
+/* Button row */
+.btn-row { margin-top: 2px; }
+.btn-row-secondary {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.btn-row-secondary .btn-secondary {
+  flex: 1;
+  justify-content: center;
+}
+.btn-abort { }
+.btn-abort:not(:disabled):hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: var(--red-lt);
+}
+
+/* Larger plot button in table */
+.btn-plot {
+  font-size: 14px;   /* was 10px */
+  padding: 1px 4px;
+}
