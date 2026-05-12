@@ -1,142 +1,153 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/fileio.js  ·  File parsing and drop-zone logic
+//  ui/fileio.js  ·  File parsing + drop-zone setup
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
+// ── Expression matrix ────────────────────────────────────────
 /**
- * Parse expression matrix (CSV/TSV/TXT).
- * First row = header (sample names).
- * First col = gene names.
- * Auto log2+1 transforms if max > 20.
+ * Parse a CSV/TSV expression matrix.
+ * Row 0 = header (sample names, first cell ignored).
+ * Col 0 = gene names.
+ * Auto log2+1 if max > 20.
  */
 export function parseExpr(text) {
   const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 3) throw new Error('Expression file must have ≥3 rows');
+  if (lines.length < 3)
+    throw new Error('Expression file needs ≥ 3 rows (header + ≥ 2 genes)');
 
-  // Detect delimiter
-  const tab = (lines[0].match(/\t/g) || []).length;
-  const com = (lines[0].match(/,/g)  || []).length;
+  const tab = (lines[0].match(/\t/g) ?? []).length;
+  const com = (lines[0].match(/,/g)  ?? []).length;
   const delim = tab >= com ? '\t' : ',';
 
-  const parts0 = lines[0].split(delim).map(cleanCell);
-  const sNames = parts0.slice(1);
+  const h0     = lines[0].split(delim).map(cleanCell);
+  const sNames = h0.slice(1);
+  const nS     = sNames.length;
+  if (nS < 4)
+    throw new Error(`Only ${nS} sample columns found. Check delimiter.`);
 
-  const gNames = [], mat = [];
+  const gNames = [];
+  const mat    = [];
 
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(delim);
     if (parts.length < 2) continue;
     gNames.push(cleanCell(parts[0]));
-    const row = new Float64Array(sNames.length);
-    for (let j = 0; j < sNames.length; j++) {
+    const row = new Float64Array(nS);
+    for (let j = 0; j < nS; j++) {
       const v = parseFloat(parts[j + 1]);
-      row[j] = isNaN(v) ? 0 : v;
+      row[j]  = isNaN(v) ? 0 : v;
     }
     mat.push(row);
   }
 
-  // Auto log2+1
+  if (mat.length === 0)
+    throw new Error('No gene rows parsed. Check file format.');
+
+  // Auto log2+1 transform when data looks like raw counts
   let mx = 0;
   for (const r of mat) for (const v of r) if (v > mx) mx = v;
   let transformed = false;
   if (mx > 20) {
-    for (const r of mat) for (let j = 0; j < r.length; j++) r[j] = Math.log2(r[j] + 1);
+    for (const r of mat)
+      for (let j = 0; j < r.length; j++)
+        r[j] = Math.log2(r[j] + 1);
     transformed = true;
   }
 
   return { gNames, sNames, mat, maxRaw: mx, transformed };
 }
 
+// ── GMT parsing ──────────────────────────────────────────────
 /**
  * Parse MSigDB GMT format.
- * Tab-delimited: name \t url \t gene1 \t gene2 …
- * URL field is preserved for linking.
+ * Each line: name \t url \t gene1 \t gene2 …
+ * The URL in column 1 is preserved for hyperlinks.
  */
 export function parseGMT(text) {
-  return text.trim().split(/\r?\n/)
-    .filter(l => l.trim())
-    .map(l => {
-      const parts = l.split('\t');
-      const name  = cleanCell(parts[0]);
-      const url   = cleanCell(parts[1]);   // MSigDB provides URL here
-      const genes = parts.slice(2).map(cleanCell).filter(Boolean);
-      return { name, url, genes };
-    })
-    .filter(p => p.genes.length > 0);
+  const result = [];
+  for (const line of text.trim().split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    const parts = t.split('\t');
+    if (parts.length < 3) continue;
+    const name  = cleanCell(parts[0]);
+    const url   = cleanCell(parts[1]);     // MSigDB URL — keep as-is
+    const genes = parts.slice(2).map(cleanCell).filter(Boolean);
+    if (genes.length > 0) result.push({ name, url, genes });
+  }
+  if (result.length === 0)
+    throw new Error('No valid GMT rows found (expect: name\\turl\\tgene1\\t…)');
+  return result;
 }
 
+// ── Pathway CSV ──────────────────────────────────────────────
 /**
- * Parse pathway CSV: header row, then Pathway,Genes(;-separated).
+ * Parse simple pathway CSV: header, then Pathway,Genes(;-sep).
  */
 export function parsePathwayCSV(text) {
-  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  const lines  = text.trim().split(/\r?\n/).filter(l => l.trim());
   const result = [];
   for (let i = 1; i < lines.length; i++) {
-    const parts = csvSplit(lines[i]);
+    const parts = _csvSplit(lines[i]);
     if (parts.length < 2) continue;
     const name  = cleanCell(parts[0]);
     const genes = parts[1].split(';').map(cleanCell).filter(Boolean);
-    result.push({ name, url: null, genes });
+    if (genes.length > 0) result.push({ name, url: null, genes });
   }
   return result;
 }
 
+// ── Mask builder ─────────────────────────────────────────────
 /**
- * Build Uint8Array masks for each pathway.
- * Only pathways with ≥5 matched genes are returned.
+ * Build Uint8Array masks (gene in set = 1).
+ * Only returns pathways with ≥ 5 matched genes.
+ *
+ * @param {Array<{name,url,genes}>} rawPathways
+ * @param {string[]}                geneNames
+ * @returns {Array<{name,url,mask,size}>}
  */
 export function buildMasks(rawPathways, geneNames) {
   const idx = new Map();
   geneNames.forEach((g, i) => idx.set(g, i));
   const nG = geneNames.length;
 
-  return rawPathways.map(p => {
+  const out = [];
+  for (const p of rawPathways) {
     const mask = new Uint8Array(nG);
     for (const g of p.genes) {
       const i = idx.get(g);
       if (i !== undefined) mask[i] = 1;
     }
     const size = mask.reduce((s, v) => s + v, 0);
-    if (size < 5) return null;
-    return { name: p.name, url: p.url || null, mask, size };
-  }).filter(Boolean);
-}
-
-/** Infer MSigDB collection URL from pathway name (fallback heuristic). */
-export function inferMSigDBUrl(name, providedUrl) {
-  if (providedUrl && providedUrl.startsWith('http')) return providedUrl;
-  // MSigDB standard URL pattern
-  const base = 'https://www.gsea-msigdb.org/gsea/msigdb/human/geneset/';
-  return base + encodeURIComponent(name) + '.html';
-}
-
-// ── Helpers ────────────────────────────────────────────────
-
-function cleanCell(s) {
-  if (!s) return '';
-  return s.trim().replace(/^["']|["']$/g, '');
-}
-
-function csvSplit(line) {
-  const out = []; let cur = '', q = false;
-  for (const c of line) {
-    if (c === '"') { q = !q; }
-    else if (c === ',' && !q) { out.push(cur); cur = ''; }
-    else cur += c;
+    if (size >= 5) out.push({ name: p.name, url: p.url ?? null, mask, size });
   }
-  out.push(cur);
   return out;
 }
 
+// ── MSigDB URL ───────────────────────────────────────────────
 /**
- * Attach drag-and-drop + file-input handlers to a drop zone.
+ * Return a usable MSigDB URL for a pathway.
+ * If the GMT file provided a real URL, use it.
+ * Otherwise construct the standard MSigDB human geneset URL.
+ */
+export function msigdbUrl(name, providedUrl) {
+  if (providedUrl && /^https?:\/\//.test(providedUrl)) return providedUrl;
+  return `https://www.gsea-msigdb.org/gsea/msigdb/human/geneset/${encodeURIComponent(name)}.html`;
+}
+
+// ── Drop-zone setup ──────────────────────────────────────────
+/**
+ * Attach drag-and-drop + click-to-browse behaviour to a drop zone.
+ * @param {string}           dzId    element id of the .dz div
+ * @param {string}           fiId    element id of the hidden <input type=file>
+ * @param {(File)=>void}     onFile
  */
 export function setupDropZone(dzId, fiId, onFile) {
   const dz = document.getElementById(dzId);
   const fi = document.getElementById(fiId);
 
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', ()  => dz.classList.remove('over'));
   dz.addEventListener('drop', e => {
     e.preventDefault();
     dz.classList.remove('over');
@@ -145,7 +156,22 @@ export function setupDropZone(dzId, fiId, onFile) {
   });
   fi.addEventListener('change', e => {
     const f = e.target.files[0];
-    if (f) onFile(f);
-    fi.value = '';   // reset so same file can be re-loaded
+    if (f) { onFile(f); fi.value = ''; }
   });
+}
+
+// ── Helpers ──────────────────────────────────────────────────
+function cleanCell(s) {
+  return (s ?? '').trim().replace(/^["']|["']$/g, '');
+}
+
+function _csvSplit(line) {
+  const out = []; let cur = '', q = false;
+  for (const c of line) {
+    if (c === '"') q = !q;
+    else if (c === ',' && !q) { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
 }
