@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  iGSEA v2.5
+//  main.js  ·  iGSEA v2.6
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -9,7 +9,8 @@ import {
 }                           from './ui/fileio.js';
 import {
   drawCurve, updatePlotHeader, renderESStats, resetZoom,
-  drawNESChart, exportCurrentCurvePNG, exportAllCurves
+  drawNESChart, exportCurrentCurvePNG, exportAllCurves,
+  exportSVGAsPNG
 }                           from './ui/plot.js';
 import { renderTable }      from './ui/table.js';
 import {
@@ -39,7 +40,7 @@ function checkJStat() {
     badge.textContent = 'jStat ✓';
     badge.className   = 'jstat-badge ok';
   } else {
-    log('jStat unavailable', 'warn');
+    log('jStat unavailable — switching to permutation engine', 'warn');
     badge.textContent = 'jStat ✗';
     badge.className   = 'jstat-badge err';
     const opt = document.querySelector('#sel-engine option[value="parametric"]');
@@ -50,56 +51,89 @@ function checkJStat() {
 }
 setTimeout(checkJStat, 100);
 
-// ── UI ────────────────────────────────────────────────────────
+// ── Mode tabs ─────────────────────────────────────────────────
 setupModeTabs();
 
+// ── Engine selector ───────────────────────────────────────────
 document.getElementById('sel-engine').addEventListener('change', e => {
   S.engine = e.target.value;
 });
 
+// ── Extended columns toggle ───────────────────────────────────
 document.getElementById('chk-extra').addEventListener('change', e => {
-  document.getElementById('rt').classList.toggle('show-ext', e.target.checked);
+  const show = e.target.checked;
+  document.getElementById('rt').classList.toggle('show-ext', show);
+  // Issue (2): FDR note only visible when extended columns shown AND >10 pathways
+  document.getElementById('fdr-note').style.display =
+    (show && S.showFDR) ? 'block' : 'none';
 });
 
-document.getElementById('btn-reset-zoom')?.addEventListener('click', () => {
-  resetZoom();
-});
+// ── Reset zoom ────────────────────────────────────────────────
+document.getElementById('btn-reset-zoom')
+  ?.addEventListener('click', () => resetZoom());
 
-// Issue (3): single-curve PNG download
-document.getElementById('btn-dl-one-curve')?.addEventListener('click', () => {
-  if (!S.results) return;
-  const sel = document.querySelector('#tbody tr.sel');
-  const name = sel?.dataset.name ?? 'curve';
-  const safe = name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
-  exportCurrentCurvePNG(`igsea_${safe}.png`);
-});
+// ── Single curve PNG download ─────────────────────────────────
+document.getElementById('btn-dl-one-curve')
+  ?.addEventListener('click', () => {
+    if (!S.results) return;
+    const sel  = document.querySelector('#tbody tr.sel');
+    const name = sel?.dataset.name ?? 'curve';
+    const safe = name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
+    exportCurrentCurvePNG(`igsea_${safe}.png`);
+  });
 
-// Issue (9): batch export all curves
-document.getElementById('btn-dl-curves')?.addEventListener('click', async () => {
-  if (!S.results || !S.pathwayList.length) return;
-  const btn = document.getElementById('btn-dl-curves');
-  btn.disabled = true;
-  btn.textContent = '⏳ Exporting…';
-  try {
-    await exportAllCurves(S.results, S.pathwayList, S.geneNames);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🖼 Export curves';
-  }
-});
+// ── Batch curve PNG export ────────────────────────────────────
+document.getElementById('btn-dl-curves')
+  ?.addEventListener('click', async () => {
+    if (!S.results || !S.pathwayList.length) return;
+    const btn = document.getElementById('btn-dl-curves');
+    btn.disabled    = true;
+    btn.textContent = '⏳ Exporting…';
+    try {
+      await exportAllCurves(S.results, S.pathwayList, S.geneNames);
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = '🖼 Export curves';
+    }
+  });
+
+// ── NES chart PNG download ────────────────────────────────────
+document.getElementById('btn-dl-nes')
+  ?.addEventListener('click', () => {
+    const svgEl = document.querySelector('#nes-chart-wrap #nes-svg');
+    if (!svgEl) return;
+    const date = new Date().toISOString().slice(0, 10);
+    exportSVGAsPNG(svgEl, `igsea_nes_chart_${date}.png`);
+  });
+
+// ── NES chart toggle (>20 pathways) ──────────────────────────
+document.getElementById('btn-toggle-nes')
+  ?.addEventListener('click', () => {
+    const body = document.getElementById('nes-chart-body');
+    const btn  = document.getElementById('btn-toggle-nes');
+    const collapsed = body.style.display === 'none';
+    body.style.display   = collapsed ? 'block' : 'none';
+    btn.textContent      = collapsed ? '▲ Hide chart' : '▼ Show chart';
+  });
 
 // ── Clear ─────────────────────────────────────────────────────
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (S.running) return;
   S.results = null;
   S.showFDR = false;
-  document.getElementById('res-panel').style.display        = 'none';
-  document.getElementById('empty-state').style.display      = 'flex';
-  document.getElementById('plot-section').style.display     = 'none';
+  document.getElementById('res-panel').style.display         = 'none';
+  document.getElementById('empty-state').style.display       = 'flex';
+  document.getElementById('plot-section').style.display      = 'none';
   document.getElementById('nes-chart-section').style.display = 'none';
-  document.getElementById('prog-wrap').style.display        = 'none';
-  document.getElementById('fdr-note').style.display         = 'none';
+  document.getElementById('prog-wrap').style.display         = 'none';
+  document.getElementById('fdr-note').style.display          = 'none';
   document.getElementById('tbody').innerHTML = '';
+  // Reset extended columns checkbox
+  const chk = document.getElementById('chk-extra');
+  if (chk.checked) {
+    chk.checked = false;
+    document.getElementById('rt').classList.remove('show-ext');
+  }
   log('Results cleared', 'ok');
 });
 
@@ -119,11 +153,13 @@ function _loadExpr(file) {
   const r = new FileReader();
   r.onload = e => {
     try {
-      const { gNames, sNames, mat, maxRaw, transformed } = parseExpr(e.target.result);
+      const { gNames, sNames, mat, maxRaw, transformed } =
+        parseExpr(e.target.result);
       S.geneNames   = gNames;
       S.sampleNames = sNames;
       S.exprMat     = mat;
-      const note = transformed ? ` · log₂+1 (rawMax=${maxRaw.toFixed(0)})` : '';
+      const note = transformed
+        ? ` · log₂+1 (rawMax=${maxRaw.toFixed(0)})` : '';
       setFileLoaded('expr', file.name,
         `${gNames.length} genes × ${sNames.length} samples${note}`);
       log(`Expression: ${gNames.length}×${sNames.length}${note}`, 'ok');
@@ -171,7 +207,7 @@ function _rebuildMasks() {
 function _updateRun() {
   setRunEnabled(!S.running && !!S.exprMat && S.pathwayList.length > 0);
   document.getElementById('btn-abort').disabled = !S.running;
-  document.getElementById('btn-clear').disabled = S.running;
+  document.getElementById('btn-clear').disabled =  S.running;
 }
 
 // ── Run iGSEA ─────────────────────────────────────────────────
@@ -257,28 +293,42 @@ document.getElementById('btn-demo').addEventListener('click', () => {
   );
 });
 
+// ── CSV export ────────────────────────────────────────────────
 document.getElementById('btn-dl').addEventListener('click', () => {
   downloadCSV(S.results, S.engine);
 });
 
-// ── Render results ─────────────────────────────────────────────
+// ── Render results ────────────────────────────────────────────
 function _renderResults(results) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('res-panel').style.display   = 'block';
 
-  // Issue (5): only pathway count, no engine badge
+  // Issue (5): pathway count only
   document.getElementById('res-count').textContent =
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
 
-  // FDR note
-  document.getElementById('fdr-note').style.display =
-    S.showFDR ? 'block' : 'none';
+  // Issue (2): FDR note hidden by default; appears only when
+  // extended columns are toggled on AND >10 pathways
+  document.getElementById('fdr-note').style.display = 'none';
 
-  // Issue (8): NES bar chart when > 10 pathways
-  const nesSection = document.getElementById('nes-chart-section');
+  // Issue (3): NES chart — shown when >10 pathways
+  const nesSection   = document.getElementById('nes-chart-section');
+  const nesBody      = document.getElementById('nes-chart-body');
+  const nesToggleBtn = document.getElementById('btn-toggle-nes');
+
   if (results.length > 10) {
     nesSection.style.display = 'block';
     drawNESChart(results, document.getElementById('nes-chart-wrap'));
+
+    // Issue (3): collapse by default when >20 pathways
+    if (results.length > 20) {
+      nesBody.style.display      = 'none';
+      nesToggleBtn.style.display = 'inline-flex';
+      nesToggleBtn.textContent   = '▼ Show chart';
+    } else {
+      nesBody.style.display      = 'block';
+      nesToggleBtn.style.display = 'none';
+    }
   } else {
     nesSection.style.display = 'none';
   }
@@ -296,16 +346,17 @@ function _selectPathway(result) {
 }
 
 // ── Resize ────────────────────────────────────────────────────
-let _rt;
+let _resizeTimer;
 window.addEventListener('resize', () => {
-  clearTimeout(_rt);
-  _rt = setTimeout(() => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
     // Redraw NES chart if visible
     if (S.results && S.results.length > 10) {
       const wrap = document.getElementById('nes-chart-wrap');
-      if (wrap) drawNESChart(S.results, wrap);
+      if (wrap && document.getElementById('nes-chart-body').style.display !== 'none')
+        drawNESChart(S.results, wrap);
     }
-    // Redraw selected curve
+    // Redraw selected enrichment curve
     if (!S.results) return;
     const sel = document.querySelector('#tbody tr.sel');
     if (!sel) return;
@@ -317,4 +368,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-log('iGSEA v2.5 ready — load files or click ⚡ Demo', 'ok');
+log('iGSEA v2.6 ready — load files or click ⚡ Demo', 'ok');
