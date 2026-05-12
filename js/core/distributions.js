@@ -1,45 +1,91 @@
 // ═══════════════════════════════════════════════════════════
-//  core/distributions.js  ·  v2.7
+//  core/distributions.js  ·  v2.8 (Zero Dependency Edition)
 //
-//  Uses jStat for:
-//    jStat.gammainc(x, a)  — regularised lower incomplete gamma P(a,x)
-//    jStat.lngamma(a)      — log Γ(a)
-//    jStat.normal.cdf(z,0,1) — standard normal CDF
-//
-//  Changes from v2.6:
-//  • Removed Gamma distribution fitting (pvalGamma / fitGamma)
-//    KS now uses permutation p-values exclusively
-//  • pvalGG returns { p, fitted } structured result
-//    instead of sentinel-value fallback
-//  • fitGenGamma: relaxed sigma guard (50 → 200),
-//    added more Nelder-Mead starts, increased iterations
-//  • Positive-data filter uses 1e-12 threshold instead of 0
+//  Changes:
+//  • Removed jStat entirely. Completely self-contained.
+//  • Added built-in numerical approximations for:
+//      - gammaln(x): Log-Gamma (Lanczos approximation)
+//      - normalCDF(x): Standard Normal CDF (Abramowitz & Stegun)
+//      - lowRegGamma(a,x): Lower Regularized Incomplete Gamma P(a,x)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
-function _js() {
-  if (typeof jStat === 'undefined')
-    throw new Error('jStat not loaded');
-  return jStat;
+// ── 内部数学核心库 (替换 jStat) ─────────────────────────────
+
+/** 计算 Gamma 函数的自然对数: ln(Γ(x)) (Lanczos 近似) */
+function gammaln(x) {
+  const cof = [
+    76.18009172947146, -86.50532032941677, 24.01409824083091,
+    -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5
+  ];
+  let y = x;
+  let tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  let ser = 1.000000000190015;
+  for (let j = 0; j < 6; j++) {
+    y += 1;
+    ser += cof[j] / y;
+  }
+  return -tmp + Math.log(2.5066282746310005 * ser / x);
+}
+
+/** 标准正态分布累积概率 CDF: Φ(x) */
+function normalCDF(x) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+
+/** 下不完全 Gamma 函数 P(a, x) = γ(a,x)/Γ(a) */
+function lowRegGamma(a, x) {
+  if (x < 0 || a <= 0) return 0;
+  if (x === 0) return 0;
+
+  const gln = gammaln(a);
+
+  if (x < a + 1.0) {
+    // 级数展开 (Series Representation)
+    let ap = a;
+    let sum = 1.0 / a;
+    let del = sum;
+    for (let n = 1; n <= 100; n++) {
+      ap += 1.0;
+      del *= x / ap;
+      sum += del;
+      if (Math.abs(del) < Math.abs(sum) * 1e-14) break;
+    }
+    return sum * Math.exp(-x + a * Math.log(x) - gln);
+  } else {
+    // 连分数展开 (Continued Fraction), 计算上 Gamma 然后用 1 减去
+    let b = x + 1.0 - a;
+    let c = 1.0 / 1e-30;
+    let d = 1.0 / b;
+    let h = d;
+    for (let i = 1; i <= 100; i++) {
+      let an = -i * (i - a);
+      b += 2.0;
+      d = an * d + b;
+      if (Math.abs(d) < 1e-30) d = 1e-30;
+      c = b + an / c;
+      if (Math.abs(c) < 1e-30) c = 1e-30;
+      d = 1.0 / d;
+      let del = d * c;
+      h *= del;
+      if (Math.abs(del - 1.0) < 1e-14) break;
+    }
+    const upper = Math.exp(-x + a * Math.log(x) - gln) * h;
+    return 1.0 - upper;
+  }
 }
 
 // ── Nelder-Mead simplex optimizer ────────────────────────────
 export function nelderMead(f, x0, opts = {}) {
-  const {
-    maxIter  = 5000,
-    maxCalls = 80000,
-    tol      = 1e-12,
-    alpha    = 1.0,
-    gamma    = 2.0,
-    rho      = 0.5,
-    sigma    = 0.5
-  } = opts;
-
+  // ...保持原有代码不变...
+  const { maxIter = 5000, maxCalls = 80000, tol = 1e-12, alpha = 1.0, gamma = 2.0, rho = 0.5, sigma = 0.5 } = opts;
   const n = x0.length;
   let calls = 0;
   const _f = x => { calls++; return f(x); };
-
-  // Initial simplex
   let s = [x0.slice()];
   for (let i = 0; i < n; i++) {
     const v = x0.slice();
@@ -47,30 +93,22 @@ export function nelderMead(f, x0, opts = {}) {
     s.push(v);
   }
   let fv = s.map(_f);
-
   for (let iter = 0; iter < maxIter && calls < maxCalls; iter++) {
-    // Sort
     const idx = Array.from({ length: n + 1 }, (_, i) => i);
     idx.sort((a, b) => fv[a] - fv[b]);
     s = idx.map(i => s[i]);
     fv = idx.map(i => fv[i]);
-
     if (fv[n] - fv[0] < tol) break;
-
-    // Centroid of all but worst
     const c = new Array(n).fill(0);
     for (let i = 0; i < n; i++)
       for (let j = 0; j < n; j++) c[j] += s[i][j] / n;
-
-    // Reflect
     const xr = c.map((ci, j) => ci + alpha * (ci - s[n][j]));
     const fr = _f(xr);
-
     if (fr < fv[0]) {
       const xe = c.map((ci, j) => ci + gamma * (xr[j] - ci));
       const fe = _f(xe);
       if (fe < fr) { s[n] = xe; fv[n] = fe; }
-      else          { s[n] = xr; fv[n] = fr; }
+      else         { s[n] = xr; fv[n] = fr; }
     } else if (fr < fv[n - 1]) {
       s[n] = xr; fv[n] = fr;
     } else {
@@ -86,24 +124,13 @@ export function nelderMead(f, x0, opts = {}) {
       }
     }
   }
-
   return { x: s[0], fval: fv[0] };
 }
 
-// ── Generalised Gamma (flexsurv parameterisation) ─────────────
-//
-//  log f(t; μ, σ, Q):
-//    w = (log t − μ) / σ
-//    k = 1/Q²
-//    u = k · exp(Q·w)
-//    log f = log|Q| + k·log k − logΓ(k) − log σ − log t + k·Q·w − u
-//
-//  Q → 0: log-normal(μ, σ)
-
+// ── Generalised Gamma ─────────────────────────────
 function ggLogPdf(t, mu, sigma, Q) {
   if (t <= 0 || sigma <= 0) return -Infinity;
   const lnt = Math.log(t);
-  const js  = _js();
 
   if (Math.abs(Q) < 1e-8) {
     const z = (lnt - mu) / sigma;
@@ -119,7 +146,7 @@ function ggLogPdf(t, mu, sigma, Q) {
 
   return Math.log(Math.abs(Q))
     + k * Math.log(k)
-    - js.gammaln(k) // 修复: 从 lngamma(k) 改为 gammaln(k)
+    - gammaln(k) // 使用内置方法
     - Math.log(sigma)
     - lnt
     + k * Qw
@@ -128,7 +155,7 @@ function ggLogPdf(t, mu, sigma, Q) {
 
 function ggNegLL(par, data) {
   const mu    = par[0];
-  const sigma = Math.exp(par[1]);   // log-transform: sigma > 0 always
+  const sigma = Math.exp(par[1]);
   const Q     = par[2];
   if (sigma < 1e-8 || sigma > 200) return 1e15;
   let ll = 0;
@@ -140,22 +167,12 @@ function ggNegLL(par, data) {
   return isFinite(ll) ? -ll : 1e15;
 }
 
-/**
- * GG survival: P(T > x | μ, σ, Q).
- * Uses jStat.gammainc for the regularised incomplete gamma.
- *
- * jStat.gammainc(x, a) = P(a,x) = lower regularised gamma
- *   Q > 0: P(T > x) = 1 − P(k, u)  [upper tail of Gamma(k,1)]
- *   Q < 0: P(T > x) = P(k, u)       [lower tail, direction flips]
- *   Q = 0: log-normal upper tail
- */
 export function ggSurvival(x, mu, sigma, Q) {
   if (x <= 0) return 1;
-  const js = _js();
 
   if (Math.abs(Q) < 1e-8) {
     const z = (Math.log(x) - mu) / sigma;
-    return 1 - js.normal.cdf(z, 0, 1);
+    return 1 - normalCDF(z); // 使用内置方法
   }
 
   const k  = 1.0 / (Q * Q);
@@ -165,27 +182,20 @@ export function ggSurvival(x, mu, sigma, Q) {
   const u = k * Math.exp(Qw);
   if (!isFinite(u) || u < 0) return Q > 0 ? 1 : 0;
 
-  // 修复: 使用 lowRegGamma，参数顺序为 (shape, x) 即 (k, u)
-  const lowerP = js.lowRegGamma(k, u); 
+  const lowerP = lowRegGamma(k, u); // 使用内置方法
   const p = Q > 0 ? 1 - lowerP : lowerP;
   return Math.max(0, Math.min(1, p));
 }
 
-/**
- * Fit GG to positive data using Nelder-Mead MLE.
- * Returns { mu, sigma, Q, ok }.
- */
 export function fitGenGamma(data) {
+  // ...保持原有代码不变...
   const pos = data.filter(v => v > 1e-12);
   if (pos.length < 10) return { ok: false };
-
   const logD = pos.map(v => Math.log(v));
   const n    = pos.length;
   const muS  = logD.reduce((s, v) => s + v, 0) / n;
   const varS = logD.reduce((s, v) => s + (v - muS) ** 2, 0) / (n - 1);
   const sigS = Math.max(Math.sqrt(varS), 1e-4);
-
-  // Multiple starts to avoid local minima
   const starts = [
     [muS, Math.log(sigS), -1.5],
     [muS, Math.log(sigS), -0.5],
@@ -193,33 +203,19 @@ export function fitGenGamma(data) {
     [muS, Math.log(sigS),  0.5],
     [muS, Math.log(sigS),  1.5],
   ];
-
   let best = null;
   for (const start of starts) {
-    const res = nelderMead(par => ggNegLL(par, pos), start,
-      { maxIter: 5000, tol: 1e-12 });
+    const res = nelderMead(par => ggNegLL(par, pos), start, { maxIter: 5000, tol: 1e-12 });
     if (best === null || res.fval < best.fval) best = res;
   }
-
   if (!best || !isFinite(best.fval)) return { ok: false };
-
   const mu    = best.x[0];
   const sigma = Math.exp(best.x[1]);
   const Q     = best.x[2];
-
   if (sigma < 1e-8 || sigma > 200) return { ok: false };
-
   return { mu, sigma, Q, ok: true };
 }
 
-/**
- * Upper-tail p-value for AD from GG fit.
- * Scales data by mean (matching R reference script).
- *
- * Returns { p, fitted }:
- *   fitted=true  → parametric p-value from GG survival
- *   fitted=false → fell back to empP
- */
 export function pvalGG(obsAD, nullAD, empP) {
   try {
     const n = nullAD.length;
@@ -241,8 +237,7 @@ export function pvalGG(obsAD, nullAD, empP) {
     }
     return { p: empP, fitted: false };
   } catch (err) {
-    // 增加此行，以便追踪数学计算异常
-    console.warn('Parametric fit failed:', err.message); 
+    console.warn('Parametric fit failed:', err);
     return { p: empP, fitted: false };
   }
 }
