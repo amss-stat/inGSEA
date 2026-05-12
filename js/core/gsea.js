@@ -1,11 +1,12 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  iGSEA orchestrator
+//  core/gsea.js  ·  v2.4
 //
-//  Performance optimisations vs previous version:
-//  1. SNR buffer pre-allocated and reused every permutation
-//  2. obsOrd buffer pre-allocated
-//  3. Time-based adaptive chunk sizing (target 40ms/chunk)
-//  4. Abort token checked between chunks
+//  Changes:
+//  • Passes weight exponent p to calcGSEAStats
+//  • permSNR as Float32Array for faster sort (ranking only)
+//  • ord as plain Array for V8 TimSort fast path
+//  • Time-adaptive chunk sizing
+//  • Abort token
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -17,70 +18,79 @@ import {
 
 import { pvalGG, pvalGamma } from './distributions.js';
 
-const MAX_PERMS      = 2000;
-const TARGET_CHUNK_MS = 40;   // aim for 40ms per chunk for smooth UI
+const MAX_PERMS       = 2000;
+const TARGET_CHUNK_MS = 40;
 
 export async function runGSEA(opts) {
   const { exprMat, geneNames, pathways, engine, onProgress, abortSignal } = opts;
-  const nPerms = Math.min(opts.nPerms | 0, MAX_PERMS);
-  const nG     = geneNames.length;
-  const nS     = exprMat[0].length;
-  const nCase  = opts.nCase | 0;
-  const nP     = pathways.length;
+  const nPerms  = Math.min(opts.nPerms | 0, MAX_PERMS);
+  const nG      = geneNames.length;
+  const nS      = exprMat[0].length;
+  const nCase   = opts.nCase | 0;
+  const nP      = pathways.length;
+  const wt      = typeof opts.weightP === 'number' ? opts.weightP : 1;
 
   if (nCase < 2 || nCase > nS - 2)
     throw new Error(`nCase=${nCase} out of range [2, ${nS-2}] (nSamples=${nS})`);
 
-  const _aborted = () => abortSignal?.aborted === true;
+  const _ab = () => abortSignal?.aborted === true;
 
-  // Fixed indices
   const cIdx = new Uint16Array(nCase);
   const tIdx = new Uint16Array(nS - nCase);
   for (let i = 0; i < nCase; i++)      cIdx[i] = i;
   for (let i = 0; i < nS - nCase; i++) tIdx[i] = i + nCase;
 
-  // ── 1. Observed statistics ──────────────────────────────────
+  // ── 1. Observed ──────────────────────────────────────────────
   onProgress(0, 'Observed', 'Computing SNR & enrichment…');
-  const obsSNR = calcSNR(exprMat, nG, cIdx, tIdx);
-  const obsOrd = new Int32Array(nG);
+  // Observed SNR uses Float64 for full precision (stored for NES)
+  const obsSNR = new Float64Array(nG);
+  calcSNR(exprMat, nG, cIdx, tIdx, obsSNR);
+
+  // ord as plain Array — V8 TimSort is faster than TypedArray.sort
+  const obsOrd = new Array(nG);
   rankOrder(obsSNR, nG, obsOrd);
 
   const obsStats = pathways.map(p =>
-    calcGSEAStats(obsSNR, obsOrd, p.mask, nG, true)
+    calcGSEAStats(obsSNR, obsOrd, p.mask, nG, true, wt)
   );
 
-  if (_aborted()) throw new Error('Aborted');
+  if (_ab()) throw new Error('Aborted');
 
-  // ── 2. Permutations ─────────────────────────────────────────
+  // ── 2. Permutations ──────────────────────────────────────────
   const nullKS = Array.from({ length: nP }, () => new Float64Array(nPerms));
   const nullAD = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
-  // Pre-allocated reusable buffers — zero GC pressure in the hot loop
-  const permArr  = new Uint16Array(nS);
+  const permArr = new Uint16Array(nS);
   for (let i = 0; i < nS; i++) permArr[i] = i;
-  const permOrd  = new Int32Array(nG);
-  const permSNR  = new Float64Array(nG);   // ← reused every iteration
-  const permC    = permArr.subarray(0, nCase);  // view, zero-copy
-  const permT    = permArr.subarray(nCase);
+
+  // Float32Array for permutation SNR: halves memory bandwidth
+  // for the sort step (ranking only, precision sufficient)
+  const permSNR = new Float32Array(nG);
+
+  // Plain Array for ord (V8 TimSort fast path)
+  const permOrd = new Array(nG);
+
+  const permC = permArr.subarray(0, nCase);   // zero-copy views
+  const permT = permArr.subarray(nCase);
 
   const t0 = performance.now();
-  let chunkSize = 10;   // start conservatively, will adapt after first chunk
-
+  let chunkSize = 5;
   let done = 0;
-  while (done < nPerms) {
-    if (_aborted()) throw new Error('Aborted');
 
-    const end = Math.min(done + chunkSize, nPerms);
-    const tChunk = performance.now();
+  while (done < nPerms) {
+    if (_ab()) throw new Error('Aborted');
+
+    const end      = Math.min(done + chunkSize, nPerms);
+    const tChunk   = performance.now();
 
     for (let j = done; j < end; j++) {
       shuffle(permArr);
-      // calcSNR writes into permSNR in place — no allocation
+      // Write into permSNR in-place (Float32, no alloc)
       calcSNR(exprMat, nG, permC, permT, permSNR);
       rankOrder(permSNR, nG, permOrd);
 
       for (let pi = 0; pi < nP; pi++) {
-        const st = calcGSEAStats(permSNR, permOrd, pathways[pi].mask, nG, false);
+        const st = calcGSEAStats(permSNR, permOrd, pathways[pi].mask, nG, false, wt);
         nullKS[pi][j] = st.ks;
         nullAD[pi][j] = st.ad;
       }
@@ -88,29 +98,28 @@ export async function runGSEA(opts) {
 
     done = end;
 
-    // Adapt chunk size to hit TARGET_CHUNK_MS
+    // Adapt chunk size to TARGET_CHUNK_MS
     const elapsed = performance.now() - tChunk;
     if (elapsed > 0 && done < nPerms) {
-      chunkSize = Math.max(1,
-        Math.min(200, Math.round(chunkSize * TARGET_CHUNK_MS / elapsed))
-      );
+      const newChunk = Math.round(chunkSize * TARGET_CHUNK_MS / elapsed);
+      chunkSize = Math.max(1, Math.min(500, newChunk));
     }
 
     const totalElapsed = (performance.now() - t0) / 1000;
-    const pct  = Math.round(done / nPerms * 80);
-    const eta  = totalElapsed > 0.1
+    const pct   = Math.round(done / nPerms * 80);
+    const eta   = totalElapsed > 0.1
       ? ((nPerms - done) / (done / totalElapsed)).toFixed(0) : '—';
-    const rate = (done / (totalElapsed + 0.001)).toFixed(0);
+    const rate  = (done / (totalElapsed + 0.001)).toFixed(0);
     onProgress(pct, 'Permutations',
       `${done}/${nPerms} · ETA ${eta}s · ${rate} perm/s`);
 
     await _yield();
   }
 
-  if (_aborted()) throw new Error('Aborted');
+  if (_ab()) throw new Error('Aborted');
 
-  // ── 3. Empirical p & NES ────────────────────────────────────
-  onProgress(81, 'Statistics', 'Computing p-values & NES…');
+  // ── 3. Empirical p & NES ─────────────────────────────────────
+  onProgress(81, 'Statistics', 'p-values & NES…');
   await _yield();
 
   const empArr = pathways.map((p, pi) => {
@@ -125,34 +134,31 @@ export async function runGSEA(opts) {
     };
   });
 
-  if (_aborted()) throw new Error('Aborted');
+  if (_ab()) throw new Error('Aborted');
 
-  // ── 4. Parametric fitting (jStat, main thread) ─────────────
+  // ── 4. Parametric fitting ─────────────────────────────────────
   let pKS_arr, pAD_arr;
   const useParam = engine === 'parametric';
 
   if (useParam) {
     onProgress(85, 'Fitting', 'Fitting null distributions (jStat)…');
     await _yield();
-
     pKS_arr = [];
     pAD_arr = [];
-
     for (let pi = 0; pi < nP; pi++) {
-      if (_aborted()) throw new Error('Aborted');
+      if (_ab()) throw new Error('Aborted');
       const r = empArr[pi];
       pKS_arr.push(pvalGamma(r.ok, nullKS[pi], r.pKS_emp));
       pAD_arr.push(pvalGG(r.oa, nullAD[pi], r.pAD_emp));
-      // Yield every 5 pathways to avoid blocking
-      if (pi % 5 === 4) await _yield();
+      if (pi % 3 === 2) await _yield();
     }
   } else {
     pKS_arr = empArr.map(r => r.pKS_emp);
     pAD_arr = empArr.map(r => r.pAD_emp);
   }
 
-  // ── 5. Assemble ─────────────────────────────────────────────
-  onProgress(97, 'Assembling', 'Cauchy combination & FDR…');
+  // ── 5. Assemble ──────────────────────────────────────────────
+  onProgress(97, 'Assembling', 'Cauchy & FDR…');
   await _yield();
 
   const results = pathways.map((p, pi) => {
@@ -173,11 +179,12 @@ export async function runGSEA(opts) {
       pCauchy: pC,
       fdr:     null,
       curve:   obsStats[pi].curve,
-      obsOrd,        // shared Int32Array reference — do not mutate externally
+      obsOrd,
       peakIdx: obsStats[pi].peakIdx
     };
   });
 
+  // BH-FDR on pCauchy
   if (results.length > 1) {
     const pv = results.map(r => r.pCauchy);
     const qv = bhFDR(pv);
