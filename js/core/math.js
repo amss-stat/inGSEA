@@ -370,3 +370,188 @@ export function calcGseaFDR(obsNES, nullNESMat, twoSided) {
 
   return fdr;
 }
+
+
+/**
+ * Permutation-based FDR on pCauchy.
+ *
+ * Uses the null distribution of pCauchy values derived directly
+ * from permutation ES and AD statistics, preserving the
+ * inter-pathway correlation structure.
+ *
+ * Algorithm:
+ *   1. For each permutation j, compute null pCauchy(pi,j) for
+ *      all pathways using rank-based p-value approximation.
+ *   2. For each observed pCauchy threshold t:
+ *        V(t) = expected # pathways with null pCauchy <= t
+ *             = (1/nPerms) * Σ_j #{pi : null_pCauchy(pi,j) <= t}
+ *        R(t) = # pathways with obs pCauchy <= t
+ *        FDR(t) = V(t) / R(t), clamped to [0,1]
+ *   3. Isotonic correction: running minimum from smallest to
+ *      largest pCauchy (most to least significant).
+ *
+ * Correlation handling:
+ *   Because all pathways share the same permutation j,
+ *   the joint null distribution reflects actual inter-pathway
+ *   correlations without any independence assumption.
+ *
+ * Self-comparison bias:
+ *   Rank-based null p-values include the observation itself
+ *   in the reference distribution, causing slight conservative
+ *   bias of order 1/nPerms. Acceptable for nPerms >= 500.
+ *
+ * @param {number[]}       obsPCauchy   observed pCauchy [nP]
+ * @param {Float64Array[]} nullKS       null KS ES matrix [nP][nPerms]
+ * @param {Float64Array[]} nullAD       null AD matrix    [nP][nPerms]
+ * @param {number}         nPerms
+ * @returns {Float64Array} fdr [nP], isotonically corrected
+ */
+export function permFDR(obsPCauchy, nullKS, nullAD, nPerms) {
+  const nP  = obsPCauchy.length;
+  const fdr = new Float64Array(nP).fill(1.0);
+  if (nP < 2) return fdr;
+
+  // ── Step 1: Pre-sort null KS and null AD for rank lookup ───
+  // For each pathway pi, we need the rank of nullKS[pi][j]
+  // within nullKS[pi] to get the null p-value.
+  //
+  // Approach: sort a copy of each row, then use binary search
+  // to find the rank of each element.
+
+  // sortedKS[pi] = nullKS[pi] sorted ascending (for |KS|, two-sided)
+  // sortedAD[pi] = nullAD[pi] sorted ascending (for AD, one-sided)
+  const sortedAbsKS = new Array(nP);
+  const sortedAD    = new Array(nP);
+
+  for (let pi = 0; pi < nP; pi++) {
+    // KS is two-sided: use |KS|
+    const absKS = new Float64Array(nPerms);
+    const ksVec = nullKS[pi];
+    for (let j = 0; j < nPerms; j++)
+      absKS[j] = ksVec[j] < 0 ? -ksVec[j] : ksVec[j];
+    absKS.sort();
+    sortedAbsKS[pi] = absKS;
+
+    // AD is one-sided (always positive)
+    const adCopy = nullAD[pi].slice().sort();
+    sortedAD[pi] = adCopy;
+  }
+
+  // ── Step 2: Build null pCauchy matrix ──────────────────────
+  // nullPCauchy[j] = Float64Array of length nP
+  // (one value per pathway for permutation j)
+  //
+  // We don't store the full matrix to save memory.
+  // Instead, for each threshold t we need to count
+  // #{pi : nullPCauchy(pi,j) <= t} across all j.
+  //
+  // Strategy: build the full null pCauchy distribution as a
+  // flat sorted array of nP*nPerms values, then use binary
+  // search for FDR counting.
+  //
+  // Memory: nP * nPerms * 8 bytes = 500 * 1000 * 8 = 4MB — OK
+
+  // Helper: rank-based p-value (Laplace smoothed)
+  // countGeqAbs: # values in sortedAbs >= |obs| (two-sided)
+  function nullPKS(pi, absObs) {
+    // Binary search in sortedAbsKS[pi] (ascending)
+    // count >= absObs
+    const arr = sortedAbsKS[pi];
+    let lo = 0, hi = nPerms;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] < absObs) lo = mid + 1; else hi = mid;
+    }
+    const c = nPerms - lo;
+    return (c + 1) / (nPerms + 1);
+  }
+
+  // countGeq: # values in sortedAD >= obs (one-sided)
+  function nullPAD(pi, obs) {
+    const arr = sortedAD[pi];
+    let lo = 0, hi = nPerms;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] < obs) lo = mid + 1; else hi = mid;
+    }
+    const c = nPerms - lo;
+    return (c + 1) / (nPerms + 1);
+  }
+
+  // Build flat null pCauchy array
+  const nullPCauchyFlat = new Float64Array(nP * nPerms);
+  let ptr = 0;
+
+  for (let j = 0; j < nPerms; j++) {
+    for (let pi = 0; pi < nP; pi++) {
+      const ksVal = nullKS[pi][j];
+      const adVal = nullAD[pi][j];
+
+      const absKS = ksVal < 0 ? -ksVal : ksVal;
+      const pKS   = nullPKS(pi, absKS);
+      const pAD   = nullPAD(pi, adVal);
+
+      nullPCauchyFlat[ptr++] = cauchyCombine(pKS, pAD);
+    }
+  }
+
+  // Sort ascending for binary search
+  nullPCauchyFlat.sort();
+  const nNull = nullPCauchyFlat.length;  // = nP * nPerms
+
+  // ── Step 3: FDR for each observed pCauchy ──────────────────
+  // Sort observed pCauchy ascending (smallest = most significant first)
+  const idxObs = Array.from({ length: nP }, (_, i) => i);
+  idxObs.sort((a, b) => obsPCauchy[a] - obsPCauchy[b]);
+
+  // For threshold t = obsPCauchy[idxObs[r]]:
+  //   R(t) = r + 1   (# obs with pCauchy <= t, since sorted ascending)
+  //   V(t) = #{null pCauchy <= t} / nPerms
+  //          (expected # pathways per permutation with null pCauchy <= t)
+  //
+  // FDR(t) = V(t) / R(t)
+
+  // Count null pCauchy <= t via binary search (upper_bound)
+  function countNullLeq(t) {
+    let lo = 0, hi = nNull;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (nullPCauchyFlat[mid] <= t) lo = mid + 1; else hi = mid;
+    }
+    return lo;  // # elements <= t
+  }
+
+  const rawFDR = new Float64Array(nP);
+  for (let r = 0; r < nP; r++) {
+    const idx = idxObs[r];
+    const t   = obsPCauchy[idx];
+
+    // V(t): expected # null pCauchy <= t per permutation
+    // = (total null pCauchy <= t) / nPerms
+    const nullLeq = countNullLeq(t);
+    const Vt = nullLeq / nPerms;  // expected false positives
+
+    // R(t): observed # pCauchy <= t
+    const Rt = r + 1;
+
+    rawFDR[r] = Math.min(Vt / Rt, 1.0);
+  }
+
+  // ── Step 4: Isotonic correction ────────────────────────────
+  // FDR must be non-decreasing as pCauchy increases
+  // (less significant thresholds must have >= FDR)
+  //
+  // We've sorted ascending pCauchy: r=0 most significant.
+  // Correction: scan from r=nP-1 (least significant) down to r=0,
+  // carrying running minimum — ensures FDR non-decreasing with p.
+  //
+  // After correction: fdr[r=0] <= fdr[r=1] <= ... <= fdr[r=nP-1]
+
+  let minFDR = 1.0;
+  for (let r = nP - 1; r >= 0; r--) {
+    if (rawFDR[r] < minFDR) minFDR = rawFDR[r];
+    fdr[idxObs[r]] = minFDR;
+  }
+
+  return fdr;
+}
