@@ -1,14 +1,9 @@
 // ═══════════════════════════════════════════════════════════
 //  ui/plot.js  ·  v2.5
-//
-//  Changes from v2.4:
-//  1. Issue (2):  plot-db-link tooltip — already set via title attr in HTML;
-//                 updatePlotHeader also sets it programmatically.
-//  2. Issue (3):  downloadCurve() — exports current SVG as PNG.
-//  3. Issue (8):  drawNESChart() — horizontal bar chart of NES values.
-//  4. Issue (9):  exportAllCurves() — batch PNG export of all curves.
-//  5. Issue (10): removed Γ/GΓ from renderESStats labels.
-//  6. Drag/zoom fixes retained from v2.4.
+//  Changes:
+//  • renderESStats: removed Γ/GΓ → plain "par" label
+//  • Added exportCurvePNG(svgEl, filename) for single download
+//  • Added exportAllCurves(results, pathways, geneNames) for batch
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -20,8 +15,6 @@ const MAX_PTS = 4000;
 
 let _zoom = { i0: 0, i1: 1 };
 let _cur  = { result: null, pathways: null, geneNames: null, container: null };
-
-// ── Public API ────────────────────────────────────────────────
 
 export function drawCurve(result, pathways, geneNames, container) {
   _cur = { result, pathways, geneNames, container };
@@ -38,164 +31,614 @@ export function updatePlotHeader(result) {
   document.getElementById('plot-section').style.display = 'block';
   const link = document.getElementById('plot-db-link');
   link.href  = msigdbUrl(result.name, result.url);
-  // Issue (2): ensure tooltip is set
-  link.title = 'Jump to pathway database information';
   link.style.display = 'inline-flex';
   _zoom = { i0: 0, i1: 1 };
 }
 
-// ── Issue (3): Download current enrichment curve as PNG ───────
-export function downloadCurve(filename) {
-  const svgEl = document.getElementById('es-svg');
+// ── Single-curve PNG download (issue 3) ───────────────────────
+/**
+ * Export the currently displayed SVG as a PNG file.
+ * @param {string} filename
+ */
+export function exportCurrentCurvePNG(filename) {
+  const svgEl = document.querySelector('#svg-wrap #es-svg');
   if (!svgEl) return;
-  _svgToPng(svgEl, filename ?? 'enrichment_curve.png');
+  _svgToPNG(svgEl, filename || 'enrichment_curve.png');
 }
 
-// ── Issue (8): NES bar chart ──────────────────────────────────
 /**
- * Draw a horizontal bar chart of NES values.
- * Positive NES → bar extends right (green).
- * Negative NES → bar extends left (red).
- * Sorted top-to-bottom: largest positive → most negative.
+ * Batch-export all results as PNG files (issue 9).
+ * Renders each curve off-screen, downloads sequentially with
+ * a small delay to avoid browser download blocking.
  *
- * @param {Array}  results   — GSEA result objects with .name and .nes
- * @param {Element} container — DOM element to render into
+ * @param {Array}  results
+ * @param {Array}  pathways
+ * @param {Array}  geneNames
+ * @param {number} [width=900]
  */
-export function drawNESChart(results, container) {
-  if (!results?.length || !container) return;
+export async function exportAllCurves(results, pathways, geneNames, width = 900) {
+  const offscreen = document.createElement('div');
+  offscreen.style.cssText =
+    'position:fixed;left:-9999px;top:0;width:' + width + 'px;visibility:hidden';
+  document.body.appendChild(offscreen);
 
-  // Sort: largest NES at top
-  const sorted = [...results].sort((a, b) => b.nes - a.nes);
-  const n      = sorted.length;
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    // Render the SVG into the offscreen div
+    _renderInto(r, pathways, geneNames, offscreen, width);
+    const svgEl = offscreen.querySelector('#es-svg');
+    if (!svgEl) continue;
+    const safe = r.name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 80);
+    await _svgToPNGAsync(svgEl, `igsea_${String(i + 1).padStart(3, '0')}_${safe}.png`);
+    // Small pause between downloads
+    await _sleep(120);
+  }
 
-  const BAR_H  = Math.max(14, Math.min(28, Math.floor(520 / n)));
-  const GAP    = 3;
-  const ML     = 180;   // left margin for pathway names
-  const MR     = 50;    // right margin for value labels
-  const MT     = 28;    // top margin
-  const MB     = 24;    // bottom margin
-  const W      = Math.max(container.clientWidth || 680, 500);
-  const plotW  = W - ML - MR;
-  const H      = MT + MB + n * (BAR_H + GAP);
+  document.body.removeChild(offscreen);
+}
 
-  // Axis scale: symmetric around 0
-  const absMax = Math.max(...sorted.map(r => Math.abs(r.nes)), 0.1);
-  const xScale = (plotW / 2) / absMax;   // px per NES unit
-  const x0     = ML + plotW / 2;         // x-coordinate of NES = 0
+// ── Internal renderer ─────────────────────────────────────────
+function _render() {
+  const { result, pathways, geneNames, container } = _cur;
+  if (!result || !container) return;
+  const W = Math.max(container.clientWidth || 680, 400);
+  _renderInto(result, pathways, geneNames, container, W);
+  _attachInteraction(
+    container,
+    result.curve,
+    result.obsOrd,
+    geneNames,
+    _buildLayout(W, result.curve.length)
+  );
+}
 
-  const toX = nes => x0 + nes * xScale;
+/** Build layout constants for a given width and gene count. */
+function _buildLayout(W, nG) {
+  const pw   = W - M.l - M.r;
+  const ph   = SVG_H - M.t - M.b - M.hitH - 6;
+  const r0   = Math.max(0,    Math.floor(_zoom.i0 * (nG - 1)));
+  const r1   = Math.min(nG-1, Math.ceil (_zoom.i1 * (nG - 1)));
+  const nVis = r1 - r0 + 1;
+  const toX  = r  => M.l + ((r - r0) / Math.max(nVis - 1, 1)) * pw;
+  return { W, pw, ph, r0, r1, nVis, toX };
+}
 
-  // Axis ticks (symmetric, 5 steps each side)
-  const tickStep = _niceStep(absMax / 4);
-  const ticks    = [];
-  for (let v = 0; v <= absMax + tickStep * 0.5; v += tickStep)
-    ticks.push(v, -v);
-  const uniqueTicks = [...new Set(ticks)].sort((a, b) => a - b);
+function _renderInto(result, pathways, geneNames, container, W) {
+  W = Math.max(W || 680, 400);
+  const pw   = W - M.l - M.r;
+  const ph   = SVG_H - M.t - M.b - M.hitH - 6;
 
-  const tickSVG = uniqueTicks.map(v => {
-    const x = _f(toX(v));
-    return `
-    <line x1="$${x}" y1="$${MT - 6}" x2="$${x}" y2="$${MT + n*(BAR_H+GAP)}"
-          stroke="#e4e8ee" stroke-width="0.8" stroke-dasharray="3,4"/>
-    <text x="$${x}" y="$${MT - 8}" text-anchor="middle"
-          fill="#8090a8" font-size="9">${v.toFixed(1)}</text>`;
+  const curve  = result.curve;
+  const nG     = curve.length;
+  const ord    = result.obsOrd;
+  const isPos  = result.es >= 0;
+  const lineC  = isPos ? '#1c6e41' : '#b01c1c';
+  const fillC  = isPos ? 'rgba(28,110,65,.11)' : 'rgba(176,28,28,.09)';
+
+  const r0   = Math.max(0,    Math.floor(_zoom.i0 * (nG - 1)));
+  const r1   = Math.min(nG-1, Math.ceil (_zoom.i1 * (nG - 1)));
+  const nVis = r1 - r0 + 1;
+
+  let lo = 0, hi = 0;
+  for (let i = r0; i <= r1; i++) {
+    if (curve[i] < lo) lo = curve[i];
+    if (curve[i] > hi) hi = curve[i];
+  }
+  const pad  = Math.max(-lo, hi) * 0.15 + 0.02;
+  const yMin = lo - pad, yMax = hi + pad, yR = yMax - yMin;
+
+  const toX = r  => M.l + ((r - r0) / Math.max(nVis - 1, 1)) * pw;
+  const toY = es => M.t + ph * (1 - (es - yMin) / yR);
+  const y0  = toY(0);
+
+  const pkIdx = result.peakIdx;
+  const step  = Math.max(1, Math.ceil(nVis / MAX_PTS));
+
+  let pathD = `M${_f(toX(r0))},${_f(toY(curve[r0]))}`;
+  let fillD = `M${_f(toX(r0))},${_f(y0)}`;
+
+  for (let i = r0 + step; i <= r1; i += step) {
+    if (pkIdx >= r0 && pkIdx <= r1 && i > pkIdx && i - step <= pkIdx) {
+      pathD += ` L${_f(toX(pkIdx))},${_f(toY(curve[pkIdx]))}`;
+      fillD += ` L${_f(toX(pkIdx))},${_f(toY(curve[pkIdx]))}`;
+    }
+    pathD += ` L${_f(toX(i))},${_f(toY(curve[i]))}`;
+    fillD += ` L${_f(toX(i))},${_f(toY(curve[i]))}`;
+  }
+  pathD += ` L${_f(toX(r1))},${_f(toY(curve[r1]))}`;
+  fillD += ` L${_f(toX(r1))},${_f(toY(curve[r1]))} L${_f(toX(r1))},${_f(y0)} Z`;
+
+  const ticks   = Array.from({ length: 6 }, (_, k) => yMin + yR * k / 5);
+  const tickSVG = ticks.map(v => {
+    const y = _f(toY(v));
+    return `<line x1="${M.l}" y1="${y}" x2="${M.l+pw}" y2="${y}"
+      stroke="#e4e8ee" stroke-width="0.7" stroke-dasharray="3,4"/>
+    <text x="${M.l-5}" y="${_f(toY(v)+3.5)}"
+      text-anchor="end" fill="#8090a8" font-size="9.5">${v.toFixed(2)}</text>`;
   }).join('');
 
-  // Bars
-  const barsSVG = sorted.map((r, i) => {
-    const y    = MT + i * (BAR_H + GAP);
-    const nes  = r.nes;
-    const barX = nes >= 0 ? x0 : toX(nes);
-    const barW = Math.abs(nes) * xScale;
-    const col  = nes >= 0 ? '#1c6e41' : '#b01c1c';
-    const lCol = nes >= 0 ? '#134d2e' : '#7a1313';
-    const sig  = r.pCauchy != null && r.pCauchy < 0.05;
-    const nameX = ML - 5;
+  const pathway = pathways.find(p => p.name === result.name);
+  const mask    = pathway?.mask ?? null;
+  const hitY    = M.t + ph + 6;
+  let   hitSVG  = '';
+  if (mask) {
+    const parts = [];
+    for (let i = r0; i <= r1; i++)
+      if (mask[ord[i]]) parts.push(`M${_f(toX(i))},${hitY} v${M.hitH-5}`);
+    if (parts.length)
+      hitSVG = `<path d="${parts.join(' ')}"
+        stroke="${lineC}" stroke-width="1.1" opacity="0.65" fill="none"/>`;
+  }
 
-    // Significance marker
-    const sigMark = sig ? '★' : '';
+  let peakSVG = '';
+  if (pkIdx >= r0 && pkIdx <= r1) {
+    const px = _f(toX(pkIdx)), py = _f(toY(curve[pkIdx]));
+    peakSVG = `
+    <line x1="${px}" y1="${M.t}" x2="${px}" y2="${M.t+ph}"
+      stroke="#a05c07" stroke-width="1" stroke-dasharray="4,3"
+      opacity="0.7" clip-path="url(#cp)"/>
+    <circle cx="${px}" cy="${py}" r="4"
+      fill="#a05c07" stroke="white" stroke-width="1.2"
+      clip-path="url(#cp)"/>`;
+  }
 
-    // Clip name to fit in left margin
-    const shortName = _esc(r.name.length > 28
-      ? r.name.slice(0, 26) + '…'
-      : r.name);
-
-    return `
-    <g class="nes-bar-group" data-name="${_esc(r.name)}">
-      <rect x="$${_f(barX)}" y="$${y}" width="$${_f(Math.max(barW, 1))}" height="$${BAR_H}"
-            fill="${col}" opacity="0.82" rx="2"/>
-      <text x="$${nameX}" y="$${y + BAR_H/2 + 4}"
-            text-anchor="end" fill="${sig ? '#1a3a6a' : '#4a5568'}"
-            font-size="${Math.min(11, BAR_H - 3)}"
-            font-weight="$${sig ? '600' : '400'}">$${shortName} ${sigMark}</text>
-      <text x="$${_f(toX(nes) + (nes >= 0 ? 3 : -3))}" y="$${y + BAR_H/2 + 4}"
-            text-anchor="${nes >= 0 ? 'start' : 'end'}"
-            fill="${lCol}" font-size="9" font-family="'JetBrains Mono',monospace"
-            font-weight="500">${nes.toFixed(2)}</text>
-    </g>`;
-  }).join('');
-
-  // Zero line
-  const zeroSVG = `
-  <line x1="$${_f(x0)}" y1="$${MT - 10}"
-        x2="$${_f(x0)}" y2="$${MT + n*(BAR_H+GAP)}"
-        stroke="#6b7280" stroke-width="1.5"/>`;
-
-  // Axis label
-  const axisLabel = `
-  <text x="$${_f(x0)}" y="$${H - 4}" text-anchor="middle"
-        fill="#7a8698" font-size="11" font-weight="500">
-    Normalized Enrichment Score (NES)
-  </text>
-  <text x="$${_f(x0 - plotW/4)}" y="$${H - 4}" text-anchor="middle"
-        fill="#b01c1c" font-size="9.5">◀ Negative</text>
-  <text x="$${_f(x0 + plotW/4)}" y="$${H - 4}" text-anchor="middle"
-        fill="#1c6e41" font-size="9.5">Positive ▶</text>
-  <text x="$${W - MR + 2}" y="$${MT + 10}" text-anchor="end"
-        fill="#9aa3b0" font-size="8.5" font-style="italic">
-    ★ p<sub>Cauchy</sub>&lt;0.05
-  </text>`;
+  const xMid     = _f(M.l + pw / 2);
+  const isZoomed = _zoom.i0 > 0.001 || _zoom.i1 < 0.999;
+  const zoomTxt  = isZoomed
+    ? `Rank ${r0+1}–${r1+1} · drag to pan · scroll to zoom · dbl-click reset`
+    : `Scroll to zoom · drag to pan · dbl-click reset`;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 $${W} $${H}" width="$${W}" height="$${H}"
-  id="nes-svg" style="font-family:'Inter',sans-serif"
-  role="img" aria-label="NES bar chart">
-  <rect width="$${W}" height="$${H}" fill="#fafbfc"/>
+  viewBox="0 0 ${W} ${SVG_H}" width="${W}" height="${SVG_H}"
+  id="es-svg" style="font-family:'Inter',sans-serif;overflow:visible"
+  role="img" aria-label="Enrichment plot: ${_esc(result.name)}">
+
+  <defs>
+    <clipPath id="cp">
+      <rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"/>
+    </clipPath>
+  </defs>
+
+  <rect width="${W}" height="${SVG_H}" fill="#fafbfc"/>
+  <rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"
+        fill="white" stroke="#dde2ea" stroke-width="0.8"/>
+
   ${tickSVG}
-  ${zeroSVG}
-  ${barsSVG}
-  ${axisLabel}
+  ${[1,2,3,4].map(k => {
+    const x = _f(M.l + pw * k / 5);
+    return `<line x1="${x}" y1="${M.t}" x2="${x}" y2="${M.t+ph}"
+      stroke="#e4e8ee" stroke-width="0.7" stroke-dasharray="3,4"/>`;
+  }).join('')}
+
+  <line x1="${M.l}" y1="${_f(y0)}" x2="${M.l+pw}" y2="${_f(y0)}"
+        stroke="#bbc4d0" stroke-width="0.9"/>
+
+  <path d="${fillD}" fill="${fillC}" clip-path="url(#cp)"/>
+  <path id="es-path" d="${pathD}" fill="none" stroke="${lineC}"
+        stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"
+        clip-path="url(#cp)"/>
+
+  ${peakSVG}
+
+  <rect x="${M.l}" y="${hitY}" width="${pw}" height="${M.hitH}"
+        fill="#f0f2f6" stroke="#dde2ea" stroke-width="0.6"/>
+  ${hitSVG}
+  <text x="${xMid}" y="${hitY+M.hitH-5}" text-anchor="middle"
+        fill="#9aa3b0" font-size="8" font-weight="600"
+        letter-spacing=".06em">GENE HITS</text>
+
+  <line x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t+ph}"
+        stroke="#adb8c4" stroke-width="1.3"/>
+  <line x1="${M.l}" y1="${M.t+ph}" x2="${M.l+pw}" y2="${M.t+ph}"
+        stroke="#adb8c4" stroke-width="1.3"/>
+
+  <text transform="translate(13,${_f(M.t+ph/2)}) rotate(-90)"
+        text-anchor="middle" fill="#7a8698"
+        font-size="10.5" font-weight="500">Enrichment Score</text>
+
+  <text x="${_f(toX(r0))}" y="${hitY+M.hitH+14}"
+        text-anchor="start" fill="#7a8698" font-size="9.5">${r0+1}</text>
+  <text x="${xMid}" y="${hitY+M.hitH+14}"
+        text-anchor="middle" fill="#7a8698" font-size="9.5">
+    ${Math.round((r0+r1)/2)+1}
+  </text>
+  <text x="${_f(toX(r1))}" y="${hitY+M.hitH+14}"
+        text-anchor="end" fill="#7a8698" font-size="9.5">${r1+1}</text>
+  <text x="${xMid}" y="${hitY+M.hitH+30}"
+        text-anchor="middle" fill="#7a8698"
+        font-size="11" font-weight="500">Gene rank</text>
+
+  <text x="${M.l+pw-2}" y="${M.t+13}" text-anchor="end"
+        fill="${isZoomed ? '#a05c07' : '#9aa3b0'}"
+        font-size="8.5" font-style="italic">${zoomTxt}</text>
+
+  <rect id="hover-overlay"
+        x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"
+        fill="transparent" style="cursor:crosshair"/>
+
+  <line id="h-line"
+        x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t+ph}"
+        stroke="#1a5fa8" stroke-width="1" stroke-dasharray="3,3"
+        opacity="0" pointer-events="none"/>
+  <circle id="h-dot" cx="${M.l}" cy="${M.t}" r="3.5"
+          fill="#1a5fa8" stroke="white" stroke-width="1.2"
+          opacity="0" pointer-events="none"/>
 </svg>`;
 
   container.innerHTML = svg;
 }
 
-// ── Issue (9): Batch export all enrichment curves ─────────────
+// ── Interaction ───────────────────────────────────────────────
+function _attachInteraction(container, curve, ord, geneNames,
+                             { pw, ph, r0, r1, nVis, toX }) {
+  // Re-derive toY from current zoom state
+  let lo = 0, hi = 0;
+  for (let i = r0; i <= r1; i++) {
+    if (curve[i] < lo) lo = curve[i];
+    if (curve[i] > hi) hi = curve[i];
+  }
+  const pad  = Math.max(-lo, hi) * 0.15 + 0.02;
+  const yMin = lo - pad, yMax = hi + pad, yR = yMax - yMin;
+  const toY  = es => M.t + (SVG_H - M.t - M.b - M.hitH - 6) * (1 - (es - yMin) / yR);
+
+  const svgEl   = container.querySelector('#es-svg');
+  const overlay = container.querySelector('#hover-overlay');
+  const hLine   = container.querySelector('#h-line');
+  const hDot    = container.querySelector('#h-dot');
+  const tooltip = document.getElementById('svg-tooltip');
+  if (!svgEl || !overlay || !tooltip) return;
+
+  let _ctm = null;
+  const getCTM  = () => { if (!_ctm) _ctm = svgEl.getScreenCTM(); return _ctm; };
+  const toSVGPt = (cx, cy) =>
+    new DOMPoint(cx, cy).matrixTransform(getCTM().inverse());
+
+  const svgXtoRank = x =>
+    Math.max(r0, Math.min(r1,
+      r0 + Math.round((x - M.l) / pw * (nVis - 1))
+    ));
+
+  let _isDragging = false;
+
+  overlay.addEventListener('mousemove', e => {
+    if (_isDragging) return;
+    const pt   = toSVGPt(e.clientX, e.clientY);
+    const rank = svgXtoRank(pt.x);
+    const es   = curve[rank];
+    const lx   = _f(toX(rank));
+    const ly   = _f(toY(es));
+
+    hLine.setAttribute('x1', lx); hLine.setAttribute('x2', lx);
+    hLine.setAttribute('opacity', '0.55');
+    hDot.setAttribute('cx', lx);  hDot.setAttribute('cy', ly);
+    hDot.setAttribute('opacity', '1');
+
+    tooltip.style.display = 'block';
+    tooltip.style.left    = (e.clientX + 14) + 'px';
+    tooltip.style.top     = (e.clientY - 42) + 'px';
+    tooltip.innerHTML =
+      `<strong>${_esc(geneNames[ord[rank]])}</strong><br>` +
+      `Rank #${rank+1}<br>ES&nbsp;${es.toFixed(4)}`;
+  });
+
+  overlay.addEventListener('mouseleave', () => {
+    if (_isDragging) return;
+    _hideHover();
+  });
+
+  const _hideHover = () => {
+    hLine.setAttribute('opacity', '0');
+    hDot.setAttribute('opacity', '0');
+    tooltip.style.display = 'none';
+  };
+
+  overlay.addEventListener('wheel', e => {
+    e.preventDefault();
+    _ctm = null;
+    const pt      = toSVGPt(e.clientX, e.clientY);
+    const foc     = Math.max(0, Math.min(1, (pt.x - M.l) / pw));
+    const zFactor = e.deltaY < 0 ? 0.7 : 1 / 0.7;
+    const span    = _zoom.i1 - _zoom.i0;
+    const newSpan = Math.max(0.01, Math.min(1, span * zFactor));
+    let   i0 = _zoom.i0 + foc * (span - newSpan);
+    let   i1 = i0 + newSpan;
+    if (i0 < 0) { i0 = 0; i1 = newSpan; }
+    if (i1 > 1) { i1 = 1; i0 = 1 - newSpan; }
+    _zoom = { i0, i1 };
+    _render();
+  }, { passive: false });
+
+  let _drag = null;
+
+  overlay.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    _ctm = null;
+    const pt = toSVGPt(e.clientX, e.clientY);
+    _drag = { startSVGX: pt.x, startI0: _zoom.i0, startI1: _zoom.i1 };
+    _isDragging = false;
+    overlay.style.cursor = 'grab';
+  });
+
+  const _onMove = e => {
+    if (!_drag) return;
+    _ctm = null;
+    const pt   = toSVGPt(e.clientX, e.clientY);
+    const dSVG = pt.x - _drag.startSVGX;
+
+    if (Math.abs(dSVG) > 3) {
+      _isDragging = true;
+      _hideHover();
+      overlay.style.cursor = 'grabbing';
+    }
+    if (!_isDragging) return;
+
+    const span   = _drag.startI1 - _drag.startI0;
+    const dFrac  = -(dSVG / pw) * span;
+    let   i0 = _drag.startI0 + dFrac;
+    let   i1 = _drag.startI1 + dFrac;
+    if (i0 < 0) { i0 = 0; i1 = span; }
+    if (i1 > 1) { i1 = 1; i0 = 1 - span; }
+    _zoom = { i0, i1 };
+  };
+
+  const _onUp = () => {
+    if (!_drag) return;
+    const wasDragging = _isDragging;
+    _drag = null; _isDragging = false;
+    overlay.style.cursor = 'crosshair';
+    if (wasDragging) _render();
+  };
+
+  window.addEventListener('mousemove', _onMove, { passive: true });
+  window.addEventListener('mouseup',   _onUp);
+
+  const obs = new MutationObserver(() => {
+    window.removeEventListener('mousemove', _onMove);
+    window.removeEventListener('mouseup',   _onUp);
+    obs.disconnect();
+  });
+  obs.observe(container, { childList: true });
+
+  overlay.addEventListener('dblclick', () => {
+    _zoom = { i0: 0, i1: 1 };
+    _ctm  = null;
+    _render();
+  });
+
+  const _onResize = () => { _ctm = null; };
+  window.addEventListener('resize', _onResize, { passive: true });
+  const obs2 = new MutationObserver(() => {
+    window.removeEventListener('resize', _onResize);
+    obs2.disconnect();
+  });
+  obs2.observe(container, { childList: true });
+}
+
+// ── ES stats row ──────────────────────────────────────────────
+export function renderESStats(result, engine, showFDR) {
+  const fmt  = p => p == null ? '—'
+    : Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
+  const sc   = p => p != null && p < 0.05 ? 'sig' : '';
+  const isPar = engine === 'parametric';
+
+  // Issue (10): no Γ/GΓ — use plain "(par)" label
+  const cells = [
+    { l: 'ES',      v: result.es.toFixed(4),    c: result.es    >= 0 ? 'pos' : 'neg' },
+    { l: 'NES',     v: result.nes.toFixed(3),   c: result.nes   >= 0 ? 'pos' : 'neg' },
+    { l: 'NES-AD',  v: result.nes_ad.toFixed(3), c: '' },
+    { l: isPar ? 'p<sub>KS</sub>&thinsp;(par)'  : 'p<sub>KS</sub>',
+      v: fmt(result.pKS),     c: sc(result.pKS) },
+    { l: isPar ? 'p<sub>AD</sub>&thinsp;(par)'  : 'p<sub>AD</sub>',
+      v: fmt(result.pAD),     c: sc(result.pAD) },
+    { l: 'p<sub>Cauchy</sub>',
+      v: fmt(result.pCauchy), c: sc(result.pCauchy) },
+    ...(showFDR && result.fdr != null
+      ? [{ l: 'FDR (BH)', v: fmt(result.fdr), c: sc(result.fdr) }]
+      : []),
+    { l: 'Size', v: `${result.size}`, c: '' }
+  ];
+
+  document.getElementById('es-stats').innerHTML = cells.map(c =>
+    `<div class="es-cell">
+       <span class="es-lbl">${c.l}</span>
+       <span class="es-val ${c.c}">${c.v}</span>
+     </div>`
+  ).join('');
+}
+
+// ── NES bar chart (issue 8) ───────────────────────────────────
 /**
- * Export all pathway enrichment curves as individual PNG files,
- * packaged into a ZIP using the JSZip library if available,
- * or downloaded sequentially (one per second) if not.
+ * Draw a horizontal NES bar chart for all results.
+ * Positive NES → bars face right (green).
+ * Negative NES → bars face left (red).
+ * Sorted: positive (largest first) on top, negative below.
  *
- * @param {Array}   results   — all GSEA results
- * @param {Array}   pathways  — pathway list (with masks)
- * @param {Array}   geneNames
- * @param {Function} onProgress  — callback(done, total)
+ * @param {Array}       results   array of result objects with .name and .nes
+ * @param {HTMLElement} container
  */
-export async function exportAllCurves(results, pathways, geneNames, onProgress) {
-  if (!results?.length) return;
+export function drawNESChart(results, container) {
+  if (!results || results.length === 0) return;
 
-  // Use an off-screen container sized to a standard width
-  const offscreen = document.createElement('div');
-  offscreen.style.cssText =
-    'position:fixed;left:-9999px;top:0;width:720px;height:400px;' +
-    'background:white;visibility:hidden;';
-  document.body.appendChild(offscreen);
+  // Sort: positive NES descending, then negative NES descending (least negative last)
+  const sorted = [...results].sort((a, b) => b.nes - a.nes);
 
-  const total = results.length;
-  const pngs  = [];   // [{ name, blob }]
+  const barH    = 18;
+  const gap     = 3;
+  const labelW  = 180;   // left label area
+  const valW    = 36;    // right value area
+  const padT    = 24;    // top padding (axis title)
+  const padB    = 28;    // bottom padding
+  const padL    = 10;
+  const padR    = 10;
 
-  for (let i = 0; i < total; i++) {
-    const r = results[i];
+  const nBars   = sorted.length;
+  const totalH  = padT + nBars * (barH + gap) + padB;
 
-    // Save and restore zoom
-    const savedZoom = { ..._zoom
+  // Container width
+  const W = Math.max(container.clientWidth || 680, 500);
+  const chartW  = W - padL - labelW - valW - padR;
+
+  // Max absolute NES for scaling
+  const maxAbs  = sorted.reduce((m, r) => Math.max(m, Math.abs(r.nes)), 0) || 1;
+
+  // Zero line x in chart coordinates
+  const zeroX   = padL + labelW + chartW / 2;
+
+  // Scale: NES → px offset from zeroX
+  const scale   = v => (v / maxAbs) * (chartW / 2);
+
+  // Build bar rows
+  const barRows = sorted.map((r, i) => {
+    const y      = padT + i * (barH + gap);
+    const yMid   = y + barH / 2;
+    const nes    = r.nes;
+    const isPos  = nes >= 0;
+    const barPx  = scale(Math.abs(nes));
+    const barX   = isPos ? zeroX : zeroX - barPx;
+    const fill   = isPos ? '#1c6e41' : '#b01c1c';
+    const fillLt = isPos ? 'rgba(28,110,65,.15)' : 'rgba(176,28,28,.12)';
+    const textX  = isPos ? zeroX + barPx + 4 : zeroX - barPx - 4;
+    const textAnchor = isPos ? 'start' : 'end';
+
+    // Significance star
+    const star = r.pCauchy < 0.001 ? '***'
+               : r.pCauchy < 0.01  ? '**'
+               : r.pCauchy < 0.05  ? '*' : '';
+
+    // Truncated label
+    const label = r.name.length > 28
+      ? r.name.slice(0, 26) + '…'
+      : r.name;
+
+    return `
+      <rect x="${_f(barX)}" y="${_f(y)}" width="${_f(barPx)}" height="${barH}"
+            fill="${fill}" opacity="0.82" rx="2"/>
+      <rect x="${padL}" y="${_f(y)}" width="${labelW - 6}" height="${barH}"
+            fill="${fillLt}" rx="2"/>
+      <text x="${padL + labelW - 8}" y="${_f(yMid + 4)}"
+            text-anchor="end" font-size="10" fill="#2a3040"
+            font-family="'Inter',sans-serif">${_esc(label)}</text>
+      <text x="${_f(textX)}" y="${_f(yMid + 4)}"
+            text-anchor="${textAnchor}" font-size="9.5"
+            font-family="'JetBrains Mono',monospace"
+            fill="${fill}" font-weight="500">
+        ${nes.toFixed(2)}${star ? ' ' + star : ''}
+      </text>`;
+  }).join('');
+
+  // Axis tick labels
+  const nTicks  = 5;
+  const ticks   = Array.from({ length: nTicks * 2 + 1 }, (_, i) => {
+    const v = ((i - nTicks) / nTicks) * maxAbs;
+    const x = zeroX + scale(v);
+    return `
+      <line x1="${_f(x)}" y1="${padT - 6}" x2="${_f(x)}" y2="${padT + nBars*(barH+gap)}"
+            stroke="${Math.abs(v) < 1e-6 ? '#adb8c4' : '#e4e8ee'}"
+            stroke-width="${Math.abs(v) < 1e-6 ? 1.2 : 0.7}"
+            stroke-dasharray="${Math.abs(v) < 1e-6 ? '' : '3,4'}"/>
+      <text x="${_f(x)}" y="${padT - 9}"
+            text-anchor="middle" font-size="8.5" fill="#8090a8"
+            font-family="'JetBrains Mono',monospace">${v.toFixed(1)}</text>`;
+  }).join('');
+
+  const legendY = padT + nBars * (barH + gap) + 16;
+  const legend  = `
+    <text x="${_f(W / 2)}" y="${legendY}"
+          text-anchor="middle" font-size="9.5" fill="#8090a8"
+          font-family="'Inter',sans-serif">
+      NES (Normalized Enrichment Score) · * p&lt;0.05 · ** p&lt;0.01 · *** p&lt;0.001
+    </text>`;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 ${W} ${totalH}" width="${W}" height="${totalH}"
+  id="nes-svg" style="font-family:'Inter',sans-serif"
+  role="img" aria-label="NES bar chart">
+
+  <rect width="${W}" height="${totalH}" fill="#fafbfc"/>
+
+  <!-- Chart title -->
+  <text x="${_f(zeroX)}" y="16" text-anchor="middle"
+        font-size="11" font-weight="600" fill="#3a4151"
+        font-family="'Inter',sans-serif">
+    Normalized Enrichment Score (NES)
+  </text>
+
+  <!-- Grid + axis ticks -->
+  ${ticks}
+
+  <!-- Bars + labels -->
+  ${barRows}
+
+  <!-- Legend -->
+  ${legend}
+</svg>`;
+
+  container.innerHTML = svg;
+}
+
+// ── PNG export helpers ────────────────────────────────────────
+/**
+ * Convert an SVG element to a PNG and trigger download.
+ * Embeds Google Fonts via a style tag (best-effort; fallback to system fonts).
+ */
+function _svgToPNG(svgEl, filename) {
+  _svgToPNGAsync(svgEl, filename).catch(console.error);
+}
+
+function _svgToPNGAsync(svgEl, filename) {
+  return new Promise((resolve, reject) => {
+    const svgClone = svgEl.cloneNode(true);
+    // Embed a minimal font declaration so the PNG is self-contained
+    const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    style.textContent = `
+      text { font-family: 'Inter', Arial, sans-serif; }
+      text[font-family*="Mono"], text[font-family*="mono"] {
+        font-family: 'Courier New', monospace;
+      }`;
+    svgClone.insertBefore(style, svgClone.firstChild);
+
+    const W   = parseInt(svgEl.getAttribute('width'),  10) || 800;
+    const H   = parseInt(svgEl.getAttribute('height'), 10) || 400;
+    const scale = 2;   // 2× for retina / print quality
+    svgClone.setAttribute('width',  W * scale);
+    svgClone.setAttribute('height', H * scale);
+
+    const blob = new Blob(
+      [new XMLSerializer().serializeToString(svgClone)],
+      { type: 'image/svg+xml' }
+    );
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas  = document.createElement('canvas');
+      canvas.width  = W * scale;
+      canvas.height = H * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(pngBlob => {
+        if (!pngBlob) { reject(new Error('Canvas toBlob failed')); return; }
+        const a = Object.assign(document.createElement('a'), {
+          href:     URL.createObjectURL(pngBlob),
+          download: filename
+        });
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        resolve();
+      }, 'image/png');
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG load failed')); };
+    img.src = url;
+  });
+}
+
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const _f   = v => v.toFixed(2);
+const _esc = s => (s ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
