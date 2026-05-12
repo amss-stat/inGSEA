@@ -608,3 +608,31 @@ td.cpname { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
   line-height: 1;
 }
 .btn-plot:hover { color: var(--blue); }
+
+/* ── NES chart section ───────────────────────────────────── */
+.nes-chart-section {
+  margin-top: 18px;
+  background: var(--surf);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px;
+}
+#nes-chart-wrap svg { display: block; width: 100%; height: auto; }
+
+/* ── Path name button (table, issue 1) ───────────────────── */
+.path-name-btn {
+  cursor: pointer;
+  color: var(--blue);
+  font-weight: 500;
+  font-size: 12px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+.path-name-btn:hover { text-decoration: underline; }
+
+/* Remove stray empty badge */
+#res-engine-badge { display: none; }
