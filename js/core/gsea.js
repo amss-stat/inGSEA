@@ -1,8 +1,13 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.6
-//  Key fix: pKS_par / pAD_par stored separately from
-//  pKS_emp / pAD_emp so CSV and table can show both.
-//  pKS / pAD = parametric when engine=parametric, else empirical.
+//  core/gsea.js  ·  v2.7
+//
+//  Key changes from v2.6:
+//  • KS always uses empirical p-values (no parametric fitting)
+//  • AD uses GG parametric approximation when engine='parametric'
+//  • pvalGG returns { p, fitted } — no sentinel-value detection
+//  • Cauchy combines pKS_emp with pAD (parametric or empirical)
+//  • Removed pvalGamma import (no longer used)
+//  • pKS_par always null (KS has no parametric path)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -12,7 +17,7 @@ import {
   calcNES, calcNES_AD, empP_KS, empP_AD
 } from './math.js';
 
-import { pvalGG, pvalGamma } from './distributions.js';
+import { pvalGG } from './distributions.js';
 
 const MAX_PERMS       = 2000;
 const TARGET_CHUNK_MS = 40;
@@ -117,11 +122,6 @@ export async function runGSEA(opts) {
   onProgress(81, 'Statistics', 'p-values & NES…');
   await _yield();
 
-  // Convert Float64Array null distributions to plain Arrays
-  // once here — avoids repeated conversion in fitting loops
-  const nullKS_arr = nullKS.map(a => Array.from(a));
-  const nullAD_arr = nullAD.map(a => Array.from(a));
-
   const empArr = pathways.map((p, pi) => {
     const ok = obsStats[pi].ks;
     const oa = obsStats[pi].ad;
@@ -137,49 +137,49 @@ export async function runGSEA(opts) {
 
   if (_ab()) throw new Error('Aborted');
 
-  // ── 4. Parametric fitting ─────────────────────────────────
+  // ── 4. AD parametric fitting (when engine = 'parametric') ─
   const useParam = engine === 'parametric';
-  // pKS_arr / pAD_arr hold the p-values used for Cauchy combination:
-  //   parametric when engine='parametric' AND fit succeeds
-  //   empirical  as fallback (or always when engine='permutation')
+
+  // KS: always empirical — no parametric path
   const pKS_arr = new Array(nP);
-  const pAD_arr = new Array(nP);
-  // pKS_par_arr / pAD_par_arr: null when engine='permutation'
-  const pKS_par_arr = new Array(nP).fill(null);
+  for (let pi = 0; pi < nP; pi++) {
+    pKS_arr[pi] = empArr[pi].pKS_emp;
+  }
+
+  // AD: parametric GG when requested, empirical as fallback
+  const pAD_arr     = new Array(nP);
   const pAD_par_arr = new Array(nP).fill(null);
 
   if (useParam) {
-    onProgress(85, 'Fitting', 'Fitting null distributions…');
+    onProgress(85, 'Fitting', 'Fitting AD null distributions (GG)…');
     await _yield();
 
+    // Convert Float64Array null distributions to plain Arrays once
+    const nullAD_arr = nullAD.map(a => Array.from(a));
+
+    let fitSuccess = 0;
     for (let pi = 0; pi < nP; pi++) {
       if (_ab()) throw new Error('Aborted');
 
-      const r = empArr[pi];
+      const r   = empArr[pi];
+      const res = pvalGG(r.oa, nullAD_arr[pi], r.pAD_emp);
 
-      // pvalGamma / pvalGG return the parametric p-value,
-      // or fall back to empP if fitting fails.
-      // We capture both outcomes separately.
-      const pKS_p = pvalGamma(r.ok, nullKS_arr[pi], r.pKS_emp);
-      const pAD_p = pvalGG(r.oa,   nullAD_arr[pi], r.pAD_emp);
-
-      // Detect fallback: if returned value === empP exactly,
-      // the parametric fit failed and we fell back.
-      // Store null in _par fields to make this explicit in output.
-      pKS_par_arr[pi] = (pKS_p === r.pKS_emp) ? null : pKS_p;
-      pAD_par_arr[pi] = (pAD_p === r.pAD_emp) ? null : pAD_p;
-
-      // For Cauchy: use parametric if available, else empirical
-      pKS_arr[pi] = pKS_p;
-      pAD_arr[pi] = pAD_p;
+      if (res.fitted) {
+        pAD_par_arr[pi] = res.p;
+        pAD_arr[pi]     = res.p;
+        fitSuccess++;
+      } else {
+        pAD_par_arr[pi] = null;
+        pAD_arr[pi]     = r.pAD_emp;
+      }
 
       if (pi % 3 === 2) await _yield();
     }
+
+    console.log(`GG fit success: ${fitSuccess}/${nP} pathways`);
   } else {
     for (let pi = 0; pi < nP; pi++) {
-      pKS_arr[pi] = empArr[pi].pKS_emp;
       pAD_arr[pi] = empArr[pi].pAD_emp;
-      // pKS_par_arr / pAD_par_arr remain null
     }
   }
 
@@ -189,6 +189,7 @@ export async function runGSEA(opts) {
 
   const results = pathways.map((p, pi) => {
     const e  = empArr[pi];
+    // Cauchy combines: pKS (always empirical) + pAD (parametric or empirical)
     const pC = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
     return {
       name:     p.name,
@@ -201,14 +202,14 @@ export async function runGSEA(opts) {
       // Empirical — always present
       pKS_emp:  e.pKS_emp,
       pAD_emp:  e.pAD_emp,
-      // Parametric — null when engine=permutation or fit failed
-      pKS_par:  pKS_par_arr[pi],
+      // Parametric — KS is always null; AD is null when not fitted
+      pKS_par:  null,
       pAD_par:  pAD_par_arr[pi],
-      // Combined — used for Cauchy and displayed as primary p-value
-      pKS:      pKS_arr[pi],
-      pAD:      pAD_arr[pi],
+      // Primary p-values used for display and Cauchy
+      pKS:      pKS_arr[pi],      // always empirical
+      pAD:      pAD_arr[pi],      // parametric if fitted, else empirical
       pCauchy:  pC,
-      fdr:      null,   // filled below
+      fdr:      null,              // filled below
       curve:    obsStats[pi].curve,
       obsOrd,
       peakIdx:  obsStats[pi].peakIdx
@@ -216,7 +217,6 @@ export async function runGSEA(opts) {
   });
 
   // ── 6. BH-FDR on pCauchy ─────────────────────────────────
-  // Always compute FDR when ≥ 2 pathways; UI decides whether to show it
   if (results.length >= 2) {
     const pv = results.map(r => r.pCauchy);
     const qv = bhFDR(pv);
