@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>iGSEA · Empirical Gene Set Enrichment</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <svg class="hdr-logo" viewBox="0 0 32 32" fill="none">
+    <rect x="1" y="1" width="30" height="30" rx="3" stroke="#1a5fa8" stroke-width="1.5"/>
+    <polyline points="4,22 9,14 14,17.5 21,7 28,12"
+              stroke="#1a5fa8" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="21" cy="7" r="2.2" fill="#d9480f"/>
+    <line x1="21" y1="9.2" x2="21" y2="23"
+          stroke="#d9480f" stroke-width="1" stroke-dasharray="2.5,2.5"/>
+  </svg>
+  <div class="hdr-brand">
+    <div class="hdr-title">iGSEA</div>
+    <div class="hdr-sub">In-browser Gene Set Enrichment Analysis · v2.0</div>
+  </div>
+  <nav class="hdr-nav">
+    <a href="https://www.gsea-msigdb.org/gsea/msigdb/" target="_blank" class="nav-link">MSigDB</a>
+    <a href="https://github.com/your-repo/igsea" target="_blank" class="nav-link">GitHub</a>
+    <span class="hdr-badge">Client-side Only</span>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT PANEL -->
+  <aside class="lp" id="lp">
+
+    <div class="sec">
+      <div class="sec-lbl">Expression Matrix</div>
+      <div class="dz" id="dz-expr">
+        <input type="file" id="fi-expr" accept=".csv,.txt,.tsv">
+        <div class="dz-icon">📊</div>
+        <div class="dz-hint">
+          Drop CSV / TSV / TXT here<br>
+          <span class="hint-sub">rows = genes &nbsp;·&nbsp; columns = samples</span>
+        </div>
+        <div class="dz-name" id="fn-expr"></div>
+        <div class="dz-stats" id="st-expr"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-lbl">Gene Sets</div>
+      <div class="dz" id="dz-path">
+        <input type="file" id="fi-path" accept=".gmt,.csv,.txt">
+        <div class="dz-icon">🧬</div>
+        <div class="dz-hint">
+          Drop GMT or CSV here<br>
+          <span class="hint-sub">GMT: MSigDB format &nbsp;·&nbsp; CSV: Pathway,Genes(;sep)</span>
+        </div>
+        <div class="dz-name" id="fn-path"></div>
+        <div class="dz-stats" id="st-path"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-lbl">Parameters</div>
+
+      <div class="fg">
+        <label class="fl">Case samples — first <em>N</em> columns</label>
+        <input type="number" class="fi" id="n-case" value="10" min="2">
+      </div>
+
+      <div class="fg">
+        <label class="fl">Permutations <span class="fl-note">(max 2000)</span></label>
+        <input type="number" class="fi" id="n-perms" value="1000" min="50" max="2000">
+      </div>
+
+      <div class="fg">
+        <label class="fl">Pathway selection</label>
+        <div class="path-sel-wrap">
+          <div class="path-mode-tabs">
+            <button class="pm-tab active" data-mode="all">All</button>
+            <button class="pm-tab" data-mode="single">Single</button>
+            <button class="pm-tab" data-mode="multi">Multi</button>
+          </div>
+          <!-- All mode: nothing extra needed -->
+          <div id="sel-single-wrap" style="display:none;margin-top:6px">
+            <select class="fi" id="sel-path-single">
+              <option value="">— choose pathway —</option>
+            </select>
+          </div>
+          <div id="sel-multi-wrap" style="display:none;margin-top:6px">
+            <select class="fi" id="sel-path-multi" multiple size="6"></select>
+            <div style="font-size:10px;color:var(--muted);margin-top:4px">
+              Ctrl/⌘+click to select multiple
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fg">
+        <label class="fl">Distribution engine</label>
+        <select class="fi" id="sel-engine">
+          <option value="gg">Generalized Gamma (AD) + Gamma (KS) — recommended</option>
+          <option value="empirical">Empirical permutation only</option>
+        </select>
+      </div>
+
+      <button class="btn-run" id="btn-run" disabled>▶ Run Analysis</button>
+
+      <div class="prog-wrap" id="prog-wrap" style="display:none">
+        <div class="prog-hdr">
+          <span>Progress</span>
+          <span id="prog-pct">0%</span>
+        </div>
+        <div class="prog-bg">
+          <div class="prog-fill" id="prog-fill"></div>
+        </div>
+        <div class="prog-status" id="prog-status">Initialising…</div>
+      </div>
+    </div>
+
+    <div class="sec sec-demo">
+      <div class="sec-lbl">Quick Start</div>
+      <button class="btn-demo" id="btn-demo">⚡ Load demo dataset</button>
+      <p class="demo-note">
+        200 genes · 20 samples (10 case / 10 ctrl)<br>
+        3 synthetic pathways (up / down / mixed)
+      </p>
+    </div>
+
+    <div class="sec sec-log">
+      <div class="sec-lbl">Log</div>
+      <div class="log" id="log"></div>
+    </div>
+
+  </aside>
+
+  <!-- RIGHT PANEL -->
+  <main class="rp" id="rp">
+
+    <div id="empty-state" class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="opacity:.25;margin-bottom:18px">
+        <rect x="2" y="2" width="60" height="60" rx="6" stroke="#1a5fa8" stroke-width="2"/>
+        <polyline points="8,44 18,28 28,35 42,14 56,24"
+                  stroke="#1a5fa8" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="42" cy="14" r="4" fill="#d9480f"/>
+      </svg>
+      <h2 class="empty-h">Ready to analyse</h2>
+      <p class="empty-p">
+        Load your expression matrix and gene sets,<br>
+        configure parameters, then press <strong>Run Analysis</strong>.<br><br>
+        All computation happens locally in your browser —<br>
+        no data is ever sent to a server.
+      </p>
+    </div>
+
+    <div id="res-panel" style="display:none">
+
+      <!-- Results toolbar -->
+      <div class="res-toolbar">
+        <div class="res-toolbar-left">
+          <span class="res-count" id="res-count"></span>
+          <span class="res-engine" id="res-engine"></span>
+        </div>
+        <div class="res-toolbar-right">
+          <label class="col-toggle-lbl">
+            <input type="checkbox" id="chk-extra-cols"> Show extended columns
+          </label>
+          <button class="btn-icon" id="btn-dl" title="Download CSV">
+            ⬇ Export CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div class="tbl-wrap">
+        <table class="rt" id="rt">
+          <thead id="rt-head"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Plot area -->
+      <div class="plot-section" id="plot-section" style="display:none">
+        <div class="plot-toolbar">
+          <div class="plot-title-wrap">
+            <span class="plot-title-lbl">Enrichment Score Walk</span>
+            <span class="plot-title-name" id="plot-name">—</span>
+            <a class="plot-db-link" id="plot-db-link" href="#" target="_blank"
+               style="display:none">↗ View in MSigDB</a>
+          </div>
+          <span class="plot-hint">Click a pathway row to update</span>
+        </div>
+        <div class="svg-container" id="svg-container"></div>
+        <div class="es-stats-row" id="es-stats-row"></div>
+      </div>
+
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Scripts (module order matters) ── -->
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
