@@ -10,15 +10,12 @@ const COLS = [
   { id:'name',     hdr:'Pathway',                      extra:false, sort:true  },
   { id:'size',     hdr:'Size',                         extra:false, sort:true  },
   { id:'nes',      hdr:'NES',                          extra:false, sort:true  },
-  { id:'fdr_ks',   hdr:'FDR (KS)',                     extra:false, sort:true  }, // 新增
   { id:'nes_ad',   hdr:'NES-AD',                       extra:false, sort:true  },
-  { id:'fdr_ad',   hdr:'FDR (AD)',                     extra:false, sort:true  }, // 新增
   { id:'pKS',      hdr:'p<sub>KS</sub>',               extra:false, sort:true  },
   { id:'pAD',      hdr:'p<sub>AD</sub>',               extra:false, sort:true  },
   { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:false, sort:true  },
   // Extended columns
-  { id:'fdr',      hdr:'FDR (BH)',                     extra:true,  sort:true  },
-  { id:'pKS_emp',  hdr:'p<sub>KS</sub>&nbsp;(perm)',   extra:true,  sort:true  },
+  { id:'fdr',      hdr:'q (Storey)',                   extra:true,  sort:true  },
   { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
   { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
 ];
