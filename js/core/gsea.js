@@ -239,7 +239,6 @@ export async function runGSEA(opts) {
   onProgress(93, 'FDR', 'Storey q-value…');
   await _yield();
 
-  const pCauchy_arr = results.map(r => r.pCauchy);
   const qArr        = nP >= 2
     ? storeyQ(pCauchy_arr)
     : Float64Array.from(pCauchy_arr);   // single pathway: q = p
