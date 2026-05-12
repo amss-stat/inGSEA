@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/controls.js  ·  UI helpers, demo generator
+//  ui/controls.js  ·  v2.6
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -18,7 +18,8 @@ export function log(msg, cls = '') {
 
 // ── Progress ─────────────────────────────────────────────────
 export function setProgress(pct, phase, msg) {
-  document.getElementById('prog-fill').style.width = Math.min(pct, 100) + '%';
+  document.getElementById('prog-fill').style.width =
+    Math.min(pct, 100) + '%';
   document.getElementById('prog-pct').textContent  = pct + '%';
   if (phase) document.getElementById('prog-phase').textContent = phase;
   if (msg)   document.getElementById('prog-msg').textContent   = msg;
@@ -52,7 +53,8 @@ export function populateSelectors(list) {
 export function setupModeTabs() {
   document.querySelectorAll('.pm-tab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.pm-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.pm-tab')
+        .forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       const m = tab.dataset.mode;
       document.getElementById('sel-single-wrap').style.display =
@@ -65,7 +67,8 @@ export function setupModeTabs() {
 
 // ── Get selected pathways ────────────────────────────────────
 export function getSelectedPathways(pathwayList) {
-  const mode = document.querySelector('.pm-tab.active')?.dataset.mode ?? 'all';
+  const mode =
+    document.querySelector('.pm-tab.active')?.dataset.mode ?? 'all';
   if (mode === 'all') return pathwayList;
   if (mode === 'single') {
     const v = document.getElementById('sel-single').value;
@@ -86,36 +89,24 @@ export function setRunEnabled(v) {
   document.getElementById('btn-run').disabled = !v;
 }
 
-// ── WebR status ──────────────────────────────────────────────
-export function setWebRStatus(state, msg) {
-  const dot   = document.getElementById('webr-dot');
-  const label = document.getElementById('webr-label');
-  dot.className = 'webr-dot ' + state;
-  const labels = {
-    loading:     'Loading R engine…',
-    installing:  'Preparing R functions…',
-    ready:       'R engine ready',
-    error:       'R unavailable'
-  };
-  label.textContent = labels[state] ?? state;
-  if (state === 'error' && msg) {
-    label.title = msg;
-    label.textContent = 'R unavailable — using permutation';
-  }
-}
-
 // ── CSV export ───────────────────────────────────────────────
 export function downloadCSV(results, engine) {
   if (!results?.length) return;
   const isP = engine === 'parametric';
 
-  // Issue (6): parametric and empirical are now separate columns
   const hdr = [
-    'Pathway', 'Size', 'NES_KS', 'NES_AD', 'ES', 'AD',
-    ...(isP ? ['pKS_par', 'pAD_par'] : []),
-    'pKS_emp', 'pAD_emp',
+    'Pathway', 'Size',
+    'NES_KS', 'NES_AD',
+    'ES', 'AD',
+    'pKS', 'pAD',          // combined (par if available, else emp)
+    ...(isP ? ['pKS_par', 'pAD_par'] : []),  // parametric only
+    'pKS_emp', 'pAD_emp',  // always empirical
     'pCauchy', 'FDR'
   ];
+
+  const fp = v =>
+    v == null ? '' :
+    Math.abs(v) < 0.001 ? v.toExponential(6) : v.toFixed(6);
 
   const rows = [hdr.join(',')];
   for (const r of results) {
@@ -126,14 +117,13 @@ export function downloadCSV(results, engine) {
       r.nes_ad.toFixed(6),
       r.es.toFixed(6),
       r.ad.toFixed(4),
-      ...(isP ? [
-        r.pKS_par != null ? r.pKS_par.toExponential(6) : '',
-        r.pAD_par != null ? r.pAD_par.toExponential(6) : ''
-      ] : []),
-      r.pKS_emp.toExponential(6),
-      r.pAD_emp.toExponential(6),
-      r.pCauchy.toExponential(6),
-      r.fdr != null ? r.fdr.toExponential(6) : ''
+      fp(r.pKS),
+      fp(r.pAD),
+      ...(isP ? [fp(r.pKS_par), fp(r.pAD_par)] : []),
+      fp(r.pKS_emp),
+      fp(r.pAD_emp),
+      fp(r.pCauchy),
+      fp(r.fdr)
     ].join(','));
   }
 
@@ -165,8 +155,8 @@ export function generateDemo() {
     for (let s = 0; s < NS; s++) {
       let v = base + sd * _randn();
       if (s < NC) {
-        if (g < 20)             v += 1.8 + Math.random() * 0.8;
-        if (g >= 50 && g < 65)  v -= 1.8 + Math.random() * 0.8;
+        if (g < 20)            v += 1.8 + Math.random() * 0.8;
+        if (g >= 50 && g < 65) v -= 1.8 + Math.random() * 0.8;
       }
       row[s] = Math.max(0, v);
     }
@@ -175,13 +165,13 @@ export function generateDemo() {
 
   const rawPathways = [
     { name: 'DEMO_UPREGULATED',   url: null,
-      genes: Array.from({length:20}, (_,i) => gNames[i]) },
+      genes: Array.from({ length: 20 }, (_, i) => gNames[i]) },
     { name: 'DEMO_DOWNREGULATED', url: null,
-      genes: Array.from({length:15}, (_,i) => gNames[i+50]) },
+      genes: Array.from({ length: 15 }, (_, i) => gNames[i + 50]) },
     { name: 'DEMO_MIXED',         url: null,
       genes: [
-        ...Array.from({length:10}, (_,i) => gNames[i+100]),
-        ...Array.from({length:10}, (_,i) => gNames[i+30])
+        ...Array.from({ length: 10 }, (_, i) => gNames[i + 100]),
+        ...Array.from({ length: 10 }, (_, i) => gNames[i + 30])
       ]}
   ];
 
