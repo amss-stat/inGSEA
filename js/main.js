@@ -30,24 +30,46 @@ const S = {
   abortCtrl:   null
 };
 
-// ── jStat check ──────────────────────────────────────────────
+// js/main.js
+
 function checkJStat() {
   const badge = document.getElementById('jstat-status');
-  if (typeof jStat !== 'undefined') {
-    log('jStat ready — parametric engine (Γ + GΓ) available', 'ok');
+
+  const ok = typeof jStat !== 'undefined'
+           && typeof jStat.lngamma    === 'function'
+           && typeof jStat.gammainc   === 'function'
+           && typeof jStat.normal     === 'object'
+           && typeof jStat.gamma      === 'object';
+
+  if (ok) {
+    log('jStat ready', 'ok');
     badge.textContent = 'jStat ✓';
     badge.className   = 'jstat-badge ok';
   } else {
-    log('jStat unavailable — parametric engine disabled', 'warn');
+    // Self-hosted file missing or corrupted — tell developer exactly why
+    const missing = [];
+    if (typeof jStat === 'undefined')            missing.push('jStat global');
+    else {
+      if (!jStat.lngamma)                        missing.push('lngamma');
+      if (!jStat.gammainc)                       missing.push('gammainc');
+      if (!jStat.normal)                         missing.push('normal');
+      if (!jStat.gamma)                          missing.push('gamma');
+    }
+    const reason = `js/vendor/jstat.min.js: missing [${missing.join(', ')}]`;
+    log(`jStat unavailable — ${reason}`, 'err');
     badge.textContent = 'jStat ✗';
     badge.className   = 'jstat-badge err';
-    const opt = document.querySelector('#sel-engine option[value="parametric"]');
+
+    const opt = document.querySelector(
+      '#sel-engine option[value="parametric"]');
     if (opt) opt.disabled = true;
     document.getElementById('sel-engine').value = 'permutation';
     S.engine = 'permutation';
   }
 }
-setTimeout(checkJStat, 100);
+
+// Synchronous — no setTimeout needed with self-hosted script
+checkJStat();
 
 // ── UI ───────────────────────────────────────────────────────
 setupModeTabs();
