@@ -112,15 +112,14 @@ function ggLogPdf(t, mu, sigma, Q) {
 
   const k = 1.0 / (Q * Q);
   const w = (lnt - mu) / sigma;
-  // Guard against overflow: Q*w can be large
   const Qw = Q * w;
-  if (Qw > 700) return -Infinity;  // exp(Qw) would overflow
+  if (Qw > 700) return -Infinity;  
   const u = k * Math.exp(Qw);
   if (!isFinite(u) || u < 0) return -Infinity;
 
   return Math.log(Math.abs(Q))
     + k * Math.log(k)
-    - js.lngamma(k)
+    - js.gammaln(k) // 修复: 从 lngamma(k) 改为 gammaln(k)
     - Math.log(sigma)
     - lnt
     + k * Qw
@@ -166,8 +165,8 @@ export function ggSurvival(x, mu, sigma, Q) {
   const u = k * Math.exp(Qw);
   if (!isFinite(u) || u < 0) return Q > 0 ? 1 : 0;
 
-  // jStat.gammainc(u, k) = P(k, u) = lower regularised gamma
-  const lowerP = js.gammainc(u, k);
+  // 修复: 使用 lowRegGamma，参数顺序为 (shape, x) 即 (k, u)
+  const lowerP = js.lowRegGamma(k, u); 
   const p = Q > 0 ? 1 - lowerP : lowerP;
   return Math.max(0, Math.min(1, p));
 }
@@ -241,7 +240,9 @@ export function pvalGG(obsAD, nullAD, empP) {
       return { p: Math.max(p, 1e-16), fitted: true };
     }
     return { p: empP, fitted: false };
-  } catch {
+  } catch (err) {
+    // 增加此行，以便追踪数学计算异常
+    console.warn('Parametric fit failed:', err.message); 
     return { p: empP, fitted: false };
   }
 }
