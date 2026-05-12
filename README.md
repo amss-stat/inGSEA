@@ -3,7 +3,7 @@ https://amss-stat.github.io/iGSEA-DEMO/
 # iGSEA — Improved Gene Set Enrichment Analysis
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-2.4-green.svg)]()
+[![Version](https://img.shields.io/badge/version-0.2.4-green.svg)]()
 
 A web-based implementation of the iGSEA framework, which extends classical
 Gene Set Enrichment Analysis with an Anderson-Darling enrichment score and
