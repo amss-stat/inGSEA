@@ -555,3 +555,69 @@ export function permFDR(obsPCauchy, nullKS, nullAD, nPerms) {
 
   return fdr;
 }
+
+
+/**
+ * Storey (2002) q-value.
+ *
+ * Estimates π₀ (proportion of true nulls) from the p-value
+ * distribution, then applies a π₀-weighted BH correction.
+ *
+ * π₀ estimation strategy:
+ *   π₀(λ) = #{p > λ} / (m × (1 − λ))
+ *   Evaluate at λ ∈ {0.05, 0.10, …, 0.50}.
+ *   Use the estimate at the largest λ where at least
+ *   max(5, m×0.10) p-values exceed λ (stability criterion).
+ *   If no stable λ found: π₀ = 1 (reduces to BH).
+ *
+ * For m < 10: always uses π₀ = 1 (too few p-values to
+ * estimate π₀ reliably).
+ *
+ * Monotonicity: q-values are guaranteed non-decreasing with
+ * p-values via right-to-left running minimum (same as BH).
+ *
+ * @param  {number[]}      pvals  raw p-values (any order)
+ * @returns {Float64Array}        q-values aligned to input
+ */
+export function storeyQ(pvals) {
+  const m = pvals.length;
+  if (m === 0) return new Float64Array(0);
+  if (m === 1) return Float64Array.from([Math.min(pvals[0], 1)]);
+
+  // ── Step 1: estimate π₀ ──────────────────────────────────
+  let pi0 = 1.0;
+
+  if (m >= 10) {
+    const lambdas = [0.05, 0.10, 0.15, 0.20, 0.25,
+                     0.30, 0.35, 0.40, 0.45, 0.50];
+    const minAbove = Math.max(5, Math.floor(m * 0.10));
+
+    // Scan from largest λ downward; take first stable estimate
+    for (let li = lambdas.length - 1; li >= 0; li--) {
+      const lam   = lambdas[li];
+      const above = pvals.filter(p => p > lam).length;
+      if (above < minAbove) continue;
+      pi0 = Math.min(above / (m * (1 - lam)), 1.0);
+      break;
+    }
+    // If no stable λ found, pi0 remains 1.0 (conservative = BH)
+  }
+
+  // ── Step 2: π₀-weighted BH ───────────────────────────────
+  // q(i) = min_{j ≥ i} { π₀ × m × p(j) / j }   (1-based rank j)
+  // Right-to-left running minimum ensures monotonicity.
+  const idx = Array.from({ length: m }, (_, i) => i);
+  idx.sort((a, b) => pvals[a] - pvals[b]);   // ascending p-value
+
+  const q    = new Float64Array(m);
+  let   minQ = 1.0;
+
+  for (let r = m - 1; r >= 0; r--) {
+    const i  = idx[r];
+    const qi = Math.min(pi0 * pvals[i] * m / (r + 1), 1.0);
+    if (qi < minQ) minQ = qi;
+    q[i] = minQ;
+  }
+
+  return q;
+}
