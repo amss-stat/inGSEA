@@ -22,7 +22,7 @@ import {
   calcSNR, rankOrder, calcGSEAStats,
   cauchyCombine, bhFDR, shuffle,
   calcNES, calcNES_AD, empP_KS, empP_AD,
-  permFDR
+  storeyQ
 } from './math.js';
 
 import { pvalGG } from './distributions.js';
@@ -231,23 +231,20 @@ export async function runGSEA(opts) {
     pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  // ── 6. Permutation FDR on pCauchy ─────────────────────────
-  // Builds null pCauchy distribution from existing nullKS/nullAD
-  // matrices using rank-based p-value approximation.
-  // Preserves inter-pathway correlation without additional permutations.
-  // Falls back to BH if nP < 2.
-  onProgress(93, 'FDR', 'Permutation FDR…');
+  // ── 6. FDR (Storey q-value on pCauchy) ───────────────────
+  // storeyQ estimates π₀ (proportion of true nulls) from the
+  // pCauchy distribution, then applies π₀-weighted BH.
+  // More powerful than BH under positive correlation;
+  // reduces to BH when π₀ cannot be estimated (m < 10).
+  onProgress(93, 'FDR', 'Storey q-value…');
   await _yield();
 
-  let fdrArr;
-  if (nP >= 2) {
-    fdrArr = permFDR(pCauchy_arr, nullKS, nullAD, nPerms);
-  } else {
-    // Single pathway: FDR undefined, set to pCauchy itself
-    fdrArr = Float64Array.from(pCauchy_arr);
-  }
+  const pCauchy_arr = results.map(r => r.pCauchy);
+  const qArr        = nP >= 2
+    ? storeyQ(pCauchy_arr)
+    : Float64Array.from(pCauchy_arr);   // single pathway: q = p
 
-  if (_ab()) throw new Error('Aborted');
+  results.forEach((r, i) => { r.fdr = qArr[i]; });
 
   // ── 7. Assemble results ───────────────────────────────────
   onProgress(98, 'Assembling', 'Assembling results…');
