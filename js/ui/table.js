@@ -15,7 +15,8 @@ const COLS = [
   { id:'pAD',      hdr:'p<sub>AD</sub>',               extra:false, sort:true  },
   { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:false, sort:true  },
   // Extended columns
-  { id:'fdr',      hdr:'q (Storey)',                   extra:true,  sort:true  },
+  { id:'fdr_ks',   hdr:'FDR<sub>KS</sub>',             extra:true,  sort:true  },
+  { id:'fdr_ad',   hdr:'FDR<sub>AD</sub>',             extra:true,  sort:true  }, 
   { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
   { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
 ];
