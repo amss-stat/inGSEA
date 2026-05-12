@@ -1,5 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  Results table
+//  ui/table.js  ·  Results table  ·  v2.5
+//  Changes:
+//  • Pathway name click → select row & draw curve (not open URL)
+//  • Separate ↗MSigDB button with tooltip next to pathway name
+//  • Removed Γ / GΓ notation → plain "par" label
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -31,10 +35,11 @@ export function renderTable(results, showFDR, engine, onSelect) {
 }
 
 function _buildHead(showFDR, engine) {
+  // Issue (10): removed Γ/GΓ — use "(par)" suffix instead
   const isPar = engine === 'parametric';
   const over = {
-    pKS: isPar ? 'p<sub>KS</sub>&thinsp;<small>(Γ)</small>'  : 'p<sub>KS</sub>',
-    pAD: isPar ? 'p<sub>AD</sub>&thinsp;<small>(GΓ)</small>' : 'p<sub>AD</sub>',
+    pKS: isPar ? 'p<sub>KS</sub>&thinsp;<small>(par)</small>'  : 'p<sub>KS</sub>',
+    pAD: isPar ? 'p<sub>AD</sub>&thinsp;<small>(par)</small>'  : 'p<sub>AD</sub>',
   };
 
   const vis = COLS.filter(c => !(c.fdrOnly && !showFDR));
@@ -63,11 +68,26 @@ function _buildBody(results, showFDR, onSelect) {
     const vis = COLS.filter(c => !(c.fdrOnly && !showFDR));
     tr.innerHTML = vis.map(c => C[c.id] ?? '').join('');
 
+    // Issue (1): clicking pathway name → select & draw curve
+    tr.querySelector('.path-link')?.addEventListener('click', e => {
+      e.preventDefault();        // do NOT navigate to MSigDB
+      _selectRow(tr);
+      onSelect(r);
+    });
+
+    // Issue (1): ↗MSigDB button beside pathway name
+    tr.querySelector('.btn-msigdb')?.addEventListener('click', e => {
+      e.stopPropagation();
+      window.open(url, '_blank', 'noopener');
+    });
+
+    // Plot button (📈)
     tr.querySelector('.btn-plot')?.addEventListener('click', e => {
       e.stopPropagation();
       _selectRow(tr);
       onSelect(r);
     });
+
     tbody.appendChild(tr);
   });
 
@@ -90,9 +110,22 @@ function _cells(r, rank, url, showFDR) {
     p == null ? '—' :
     Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
 
+  // Issue (1):
+  //   • <a class="path-link"> — href kept for accessibility/right-click,
+  //     but click is intercepted in _buildBody to show curve instead
+  //   • .btn-msigdb — opens MSigDB in new tab, has tooltip via title attr
+  //   • .btn-plot   — shows enrichment curve (same as name click)
+  const nameCell =
+    `<td class="cpname">` +
+      `<a class="path-link" href="${url}" target="_blank" rel="noopener"` +
+         ` title="${_esc(r.name)}">${_esc(r.name)}</a>` +
+      `<button class="btn-plot" title="View enrichment plot">📈</button>` +
+      `<button class="btn-msigdb" title="Jump to pathway database information">↗MSigDB</button>` +
+    `</td>`;
+
   return {
     rank:    `<td class="cn">${rank + 1}</td>`,
-    name:    `<td class="cpname"><a class="path-link" href="${url}" target="_blank" rel="noopener" title="${_esc(r.name)}">${_esc(r.name)}</a><button class="btn-plot" title="View enrichment plot">📈</button></td>`,
+    name:    nameCell,
     size:    `<td class="num neu">${r.size}</td>`,
     nes:     `<td class="num ${r.nes>=0?'pos':'neg'}">${r.nes.toFixed(3)}</td>`,
     nes_ad:  `<td class="num ${r.nes_ad>=0?'pos':'neg'}">${r.nes_ad.toFixed(3)}</td>`,
@@ -125,20 +158,32 @@ function _attachSort(results, showFDR, onSelect) {
 
 function _sorted(results) {
   const key = {
-    name:r=>r.name, size:r=>r.size, nes:r=>r.nes, nes_ad:r=>r.nes_ad,
-    pKS:r=>r.pKS, pAD:r=>r.pAD, pCauchy:r=>r.pCauchy,
-    fdr:r=>r.fdr??1, es:r=>r.es, ad:r=>r.ad,
-    pKS_emp:r=>r.pKS_emp, pAD_emp:r=>r.pAD_emp
-  }[_sortCol] || (r=>r.pCauchy);
-  return [...results].sort((a,b) => {
-    const av=key(a), bv=key(b);
-    return typeof av==='string' ? _sortDir*av.localeCompare(bv) : _sortDir*(av-bv);
+    name:    r => r.name,
+    size:    r => r.size,
+    nes:     r => r.nes,
+    nes_ad:  r => r.nes_ad,
+    pKS:     r => r.pKS,
+    pAD:     r => r.pAD,
+    pCauchy: r => r.pCauchy,
+    fdr:     r => r.fdr ?? 1,
+    es:      r => r.es,
+    ad:      r => r.ad,
+    pKS_emp: r => r.pKS_emp,
+    pAD_emp: r => r.pAD_emp,
+  }[_sortCol] || (r => r.pCauchy);
+
+  return [...results].sort((a, b) => {
+    const av = key(a), bv = key(b);
+    return typeof av === 'string'
+      ? _sortDir * av.localeCompare(bv)
+      : _sortDir * (av - bv);
   });
 }
 
 function _selectRow(tr) {
-  document.querySelectorAll('#tbody tr').forEach(t=>t.classList.remove('sel'));
+  document.querySelectorAll('#tbody tr').forEach(t => t.classList.remove('sel'));
   tr.classList.add('sel');
 }
 
-const _esc = s => (s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const _esc = s =>
+  (s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
