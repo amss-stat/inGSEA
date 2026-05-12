@@ -1,45 +1,46 @@
 // ═══════════════════════════════════════════════════════════
 //  ui/table.js  ·  v2.6
-//  Changes:
-//  (1) Pathway name truncated with ellipsis + title tooltip
-//  (2) FDR column now in extended columns (hidden by default)
-//  (5) NES-AD coloured neutral (never negative in practice)
-//  (6) Column headers updated: pKS_par / pAD_par separate from emp
+//  Fixes:
+//  • FDR col always rendered (col-ext); fp() never receives null
+//    when results.length >= 2 (gsea.js now always sets fdr)
+//  • showFDR flag controls FDR note in main.js only;
+//    table always has the column available in extended view
+//  • pKS_par / pAD_par shown in extended columns when available
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import { msigdbUrl } from './fileio.js';
 
-// Issue (2): fdrOnly removed — FDR is now an extra column
 const COLS = [
-  { id:'rank',    hdr:'#',                           extra:false, sort:false },
-  { id:'name',    hdr:'Pathway',                     extra:false, sort:true  },
-  { id:'size',    hdr:'Size',                        extra:false, sort:true  },
-  { id:'nes',     hdr:'NES',                         extra:false, sort:true  },
-  { id:'nes_ad',  hdr:'NES-AD',                      extra:false, sort:true  },
-  { id:'pKS',     hdr:'p<sub>KS</sub>',              extra:false, sort:true  },
-  { id:'pAD',     hdr:'p<sub>AD</sub>',              extra:false, sort:true  },
-  { id:'pCauchy', hdr:'p<sub>Cauchy</sub>',          extra:false, sort:true  },
-  // Issue (2): FDR moved to extended columns
-  { id:'fdr',     hdr:'FDR',                         extra:true,  sort:true  },
-  { id:'es',      hdr:'ES',                          extra:true,  sort:true  },
-  { id:'ad',      hdr:'AD',                          extra:true,  sort:true  },
-  // Issue (6): separate empirical columns
-  { id:'pKS_emp', hdr:'p<sub>KS</sub>&nbsp;(perm)',  extra:true,  sort:true  },
-  { id:'pAD_emp', hdr:'p<sub>AD</sub>&nbsp;(perm)',  extra:true,  sort:true  },
+  { id:'rank',     hdr:'#',                            extra:false, sort:false },
+  { id:'name',     hdr:'Pathway',                      extra:false, sort:true  },
+  { id:'size',     hdr:'Size',                         extra:false, sort:true  },
+  { id:'nes',      hdr:'NES',                          extra:false, sort:true  },
+  { id:'nes_ad',   hdr:'NES-AD',                       extra:false, sort:true  },
+  { id:'pKS',      hdr:'p<sub>KS</sub>',               extra:false, sort:true  },
+  { id:'pAD',      hdr:'p<sub>AD</sub>',               extra:false, sort:true  },
+  { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:false, sort:true  },
+  // Extended columns
+  { id:'fdr',      hdr:'FDR (BH)',                     extra:true,  sort:true  },
+  { id:'es',       hdr:'ES',                           extra:true,  sort:true  },
+  { id:'ad',       hdr:'AD',                           extra:true,  sort:true  },
+  { id:'pKS_emp',  hdr:'p<sub>KS</sub>&nbsp;(perm)',   extra:true,  sort:true  },
+  { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
+  { id:'pKS_par',  hdr:'p<sub>KS</sub>&nbsp;(par)',    extra:true,  sort:true  },
+  { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
 ];
 
 let _sortCol = 'pCauchy';
 let _sortDir = 1;
 
 export function renderTable(results, showFDR, engine, onSelect) {
-  _buildHead(showFDR, engine);
-  _buildBody(results, showFDR, onSelect);
-  _attachSort(results, showFDR, onSelect);
+  _buildHead(engine);
+  _buildBody(results, onSelect);
+  _attachSort(results, onSelect);
 }
 
 // ── Head ──────────────────────────────────────────────────────
-function _buildHead(showFDR, engine) {
+function _buildHead(engine) {
   const isPar = engine === 'parametric';
   const over  = {
     pKS: isPar
@@ -50,9 +51,7 @@ function _buildHead(showFDR, engine) {
       : 'p<sub>AD</sub>',
   };
 
-  // Issue (2): all cols shown/hidden purely by extra flag now
-  const vis = COLS;
-  const ths = vis.map(c => {
+  const ths = COLS.map(c => {
     const lbl = over[c.id] ?? c.hdr;
     const xc  = c.extra  ? 'col-ext' : '';
     const sc  = c.sort   ? 'sortable' : '';
@@ -65,7 +64,7 @@ function _buildHead(showFDR, engine) {
 }
 
 // ── Body ──────────────────────────────────────────────────────
-function _buildBody(results, showFDR, onSelect) {
+function _buildBody(results, onSelect) {
   const sorted = _sorted(results);
   const tbody  = document.getElementById('tbody');
   tbody.innerHTML = '';
@@ -73,20 +72,14 @@ function _buildBody(results, showFDR, onSelect) {
   sorted.forEach((r, rank) => {
     const tr = document.createElement('tr');
     tr.dataset.name = r.name;
-
     const url = msigdbUrl(r.name, r.url);
-    const C   = _cells(r, rank, url);
-    tr.innerHTML = COLS.map(c => C[c.id] ?? '').join('');
+    tr.innerHTML = COLS.map(c => _cell(c.id, r, rank, url)).join('');
 
     tr.querySelector('.path-name-btn')?.addEventListener('click', e => {
-      e.stopPropagation();
-      _selectRow(tr);
-      onSelect(r);
+      e.stopPropagation(); _selectRow(tr); onSelect(r);
     });
     tr.querySelector('.btn-plot')?.addEventListener('click', e => {
-      e.stopPropagation();
-      _selectRow(tr);
-      onSelect(r);
+      e.stopPropagation(); _selectRow(tr); onSelect(r);
     });
 
     tbody.appendChild(tr);
@@ -100,8 +93,8 @@ function _buildBody(results, showFDR, onSelect) {
   }
 }
 
-// ── Cells ─────────────────────────────────────────────────────
-function _cells(r, rank, url) {
+// ── Single cell renderer ──────────────────────────────────────
+function _cell(id, r, rank, url) {
   const pc = p =>
     p == null ? '' :
     p < 0.001 ? 's001' :
@@ -112,37 +105,67 @@ function _cells(r, rank, url) {
     p == null ? '—' :
     Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
 
-  // Issue (1): truncated name with title tooltip; buttons outside truncated span
-  const nameCell = `
-    <td class="cpname">
-      <span class="path-name-btn"
-            title="${_esc(r.name)}">${_esc(r.name)}</span>
-      <button class="btn-plot" title="View enrichment curve">📈</button>
-      <a class="btn-msigdb" href="${url}" target="_blank" rel="noopener"
-         title="Jump to pathway database information">↗MSigDB</a>
-    </td>`;
+  switch (id) {
+    case 'rank':
+      return `<td class="cn">${rank + 1}</td>`;
 
-  return {
-    rank:    `<td class="cn">${rank + 1}</td>`,
-    name:    nameCell,
-    size:    `<td class="num neu">${r.size}</td>`,
-    nes:     `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`,
-    // Issue (5): NES-AD always neutral colour
-    nes_ad:  `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`,
-    pKS:     `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`,
-    pAD:     `<td class="pv ${pc(r.pAD)}">${fp(r.pAD)}</td>`,
-    pCauchy: `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`,
-    // Issue (2): FDR is col-ext (hidden until extended columns checked)
-    fdr:     `<td class="fv col-ext ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">${fp(r.fdr)}</td>`,
-    es:      `<td class="num col-ext ${r.es >= 0 ? 'pos' : 'neg'}">${r.es.toFixed(4)}</td>`,
-    ad:      `<td class="num col-ext neu">${r.ad.toFixed(2)}</td>`,
-    pKS_emp: `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`,
-    pAD_emp: `<td class="pv col-ext ${pc(r.pAD_emp)}">${fp(r.pAD_emp)}</td>`,
-  };
+    case 'name':
+      return `<td class="cpname">
+        <span class="path-name-btn" title="${_esc(r.name)}">${_esc(r.name)}</span>
+        <button class="btn-plot" title="View enrichment curve">📈</button>
+        <a class="btn-msigdb" href="${url}" target="_blank" rel="noopener"
+           title="Jump to pathway database information">↗MSigDB</a>
+      </td>`;
+
+    case 'size':
+      return `<td class="num neu">${r.size}</td>`;
+
+    case 'nes':
+      return `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`;
+
+    // Issue (5): NES-AD always neutral
+    case 'nes_ad':
+      return `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`;
+
+    case 'pKS':
+      return `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`;
+
+    case 'pAD':
+      return `<td class="pv ${pc(r.pAD)}">${fp(r.pAD)}</td>`;
+
+    case 'pCauchy':
+      return `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`;
+
+    case 'fdr':
+      return `<td class="fv col-ext ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">
+        ${fp(r.fdr)}
+      </td>`;
+
+    case 'es':
+      return `<td class="num col-ext ${r.es >= 0 ? 'pos' : 'neg'}">${r.es.toFixed(4)}</td>`;
+
+    case 'ad':
+      return `<td class="num col-ext neu">${r.ad.toFixed(2)}</td>`;
+
+    case 'pKS_emp':
+      return `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`;
+
+    case 'pAD_emp':
+      return `<td class="pv col-ext ${pc(r.pAD_emp)}">${fp(r.pAD_emp)}</td>`;
+
+    case 'pKS_par':
+      return `<td class="pv col-ext ${pc(r.pKS_par)}">${fp(r.pKS_par)}</td>`;
+
+    case 'pAD_par':
+      return `<td class="pv col-ext ${pc(r.pAD_par)}">${fp(r.pAD_par)}</td>`;
+
+    default:
+      return '<td></td>';
+  }
 }
 
 // ── Sort ──────────────────────────────────────────────────────
-function _attachSort(results, showFDR, onSelect) {
+function _attachSort(results, onSelect) {
   document.querySelectorAll('#rt-head th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.col;
@@ -151,7 +174,7 @@ function _attachSort(results, showFDR, onSelect) {
       document.querySelectorAll('#rt-head th')
         .forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
-      _buildBody(results, showFDR, onSelect);
+      _buildBody(results, onSelect);
     });
   });
 }
@@ -170,6 +193,8 @@ function _sorted(results) {
     ad:      r => r.ad,
     pKS_emp: r => r.pKS_emp,
     pAD_emp: r => r.pAD_emp,
+    pKS_par: r => r.pKS_par ?? 1,
+    pAD_par: r => r.pAD_par ?? 1,
   }[_sortCol] ?? (r => r.pCauchy);
 
   return [...results].sort((a, b) => {
@@ -187,6 +212,4 @@ function _selectRow(tr) {
 }
 
 const _esc = s =>
-  (s ?? '').replace(/&/g, '&amp;')
-           .replace(/</g, '&lt;')
-           .replace(/>/g, '&gt;');
+  (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
