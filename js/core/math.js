@@ -225,54 +225,148 @@ export function empP_AD(obsAD, nullAD, nPerms) {
  * @param {Float64Array[]} nullNESMat - 所有置换的 NES 矩阵 [nP][nPerms]
  * @param {boolean} twoSided - 对于 KS 需要分正负，对于 AD 只需要单边
  */
-export function calcGseaFDR(obsNES, nullNESMat, twoSided = true) {
-  const nP = obsNES.length;
+/**
+ * GSEA-style FDR with isotonic correction.
+ * Subramanian et al. 2005, Supplementary Methods.
+ *
+ * For positive NES threshold t:
+ *   phiNull(t) = #{null NES >= t AND >= 0} / #{null NES >= 0}
+ *   phiObs(t)  = #{obs  NES >= t AND >= 0} / #{obs  NES >= 0}
+ *   rawFDR(t)  = phiNull(t) / phiObs(t), clamped to [0,1]
+ *
+ * Isotonic correction (original paper):
+ *   If t' > t then FDR(t') <= FDR(t)
+ *   → running minimum from least extreme to most extreme
+ *
+ * @param {number[]}       obsNES     observed NES [nP]
+ * @param {Float64Array[]} nullNESMat null NES matrix [nP][nPerms]
+ * @param {boolean}        twoSided   true=KS(pos/neg split), false=AD(all pos)
+ * @returns {Float64Array} fdr [nP], isotonically corrected
+ */
+export function calcGseaFDR(obsNES, nullNESMat, twoSided) {
+  const nP     = obsNES.length;
   const nPerms = nullNESMat[0].length;
-  const fdr = new Float64Array(nP);
+  const fdr    = new Float64Array(nP).fill(1.0);
+
+  // ── Binary search helpers (array sorted ascending) ──────────
+  // Count elements >= threshold
+  function countGeq(sorted, t) {
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid] < t) lo = mid + 1; else hi = mid;
+    }
+    return sorted.length - lo;
+  }
+
+  // Count elements <= threshold
+  function countLeq(sorted, t) {
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid] <= t) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * Process one side (positive or negative).
+   *
+   * @param {number[]} idxSide  indices into obsNES for this side
+   * @param {number[]} nullPool sorted ascending, null NES for this side
+   * @param {boolean}  geq      true=positive side, false=negative side
+   */
+  function processSide(idxSide, nullPool, geq) {
+    const nObs  = idxSide.length;
+    const nNull = nullPool.length;
+    if (nObs === 0 || nNull === 0) return;
+
+    // Sort: most extreme first
+    // Positive: descending (largest NES first, r=0)
+    // Negative: ascending  (most negative first, r=0)
+    idxSide.sort((a, b) =>
+      geq ? obsNES[b] - obsNES[a]
+          : obsNES[a] - obsNES[b]
+    );
+
+    // ── Step 1: compute rawFDR for each rank ─────────────────
+    // At rank r (0-based, most extreme first):
+    //   phiObs(r)  = (r+1) / nObs
+    //   phiNull(r) = countExtreme(nullPool, t) / nNull
+    const rawFDR = new Float64Array(nObs);
+
+    for (let r = 0; r < nObs; r++) {
+      const t = obsNES[idxSide[r]];
+
+      const nullCount = geq
+        ? countGeq(nullPool, t)
+        : countLeq(nullPool, t);
+
+      const phiNull = nullCount / nNull;
+      const phiObs  = (r + 1)  / nObs;
+
+      rawFDR[r] = Math.min(phiNull / phiObs, 1.0);
+    }
+
+    // ── Step 2: isotonic correction ───────────────────────────
+    // Original paper: "if t' > t then FDR(t') <= FDR(t)"
+    // In our ordering: r=0 is most extreme (t' > t for smaller r)
+    // So FDR must be non-increasing as r decreases.
+    // Equivalently: FDR is non-decreasing as r increases.
+    //
+    // Correct direction: scan from r=nObs-1 DOWN to r=0,
+    // carrying running minimum rightward→leftward.
+    //
+    //   corrFDR[nObs-1] = rawFDR[nObs-1]
+    //   corrFDR[r]      = min(rawFDR[r], corrFDR[r+1])
+    //
+    // This ensures corrFDR[r] <= corrFDR[r+1] for all r,
+    // i.e. more extreme NES gets <= FDR than less extreme NES.
+
+    let minFDR = 1.0;
+    for (let r = nObs - 1; r >= 0; r--) {
+      if (rawFDR[r] < minFDR) minFDR = rawFDR[r];
+      fdr[idxSide[r]] = minFDR;
+    }
+  }
 
   if (twoSided) {
-    // 1. 准备全局池 (KS 逻辑：正负分开处理)
-    const nullPos = [], nullNeg = [];
-    for (let i = 0; i < nP; i++) {
+    // ── Build null pools ──────────────────────────────────────
+    const nullPos = [];
+    const nullNeg = [];
+    for (let pi = 0; pi < nP; pi++) {
+      const vec = nullNESMat[pi];
       for (let j = 0; j < nPerms; j++) {
-        const v = nullNESMat[i][j];
-        if (v >= 0) nullPos.push(v); else nullNeg.push(v);
+        const v = vec[j];
+        if (v >= 0) nullPos.push(v);
+        else        nullNeg.push(v);
       }
     }
-    // 排序以便快速计数 (可选优化)
     nullPos.sort((a, b) => a - b);
     nullNeg.sort((a, b) => a - b);
 
+    // ── Split observed by sign ────────────────────────────────
+    const idxPos = [], idxNeg = [];
     for (let i = 0; i < nP; i++) {
-      const o = obsNES[i];
-      const isPos = o >= 0;
-      const pool = isPos ? nullPos : nullNeg;
-      const obsList = obsNES.filter(v => isPos ? v >= 0 : v < 0);
-
-      const countNull = pool.filter(v => isPos ? v >= o : v <= o).length;
-      const countObs  = obsList.filter(v => isPos ? v >= o : v <= o).length;
-
-      const phiNull = countNull / pool.length;
-      const phiObs  = countObs / obsList.length;
-      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
+      if (obsNES[i] >= 0) idxPos.push(i);
+      else                idxNeg.push(i);
     }
+
+    processSide(idxPos, nullPos, true);
+    processSide(idxNeg, nullNeg, false);
+
   } else {
-    // 2. AD 逻辑：全是正数，单边处理
+    // ── Single-sided (AD: all positive) ──────────────────────
     const nullPool = [];
-    for (let i = 0; i < nP; i++) {
-      for (let j = 0; j < nPerms; j++) nullPool.push(nullNESMat[i][j]);
+    for (let pi = 0; pi < nP; pi++) {
+      const vec = nullNESMat[pi];
+      for (let j = 0; j < nPerms; j++) nullPool.push(vec[j]);
     }
     nullPool.sort((a, b) => a - b);
 
-    for (let i = 0; i < nP; i++) {
-      const o = obsNES[i];
-      const countNull = nullPool.filter(v => v >= o).length;
-      const countObs  = obsNES.filter(v => v >= o).length;
-      
-      const phiNull = countNull / nullPool.length;
-      const phiObs  = countObs / nP;
-      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
-    }
+    const idxAll = Array.from({ length: nP }, (_, i) => i);
+    processSide(idxAll, nullPool, true);
   }
+
   return fdr;
 }
