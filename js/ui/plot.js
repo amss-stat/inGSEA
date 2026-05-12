@@ -184,9 +184,9 @@ function _renderInto(result, pathways, geneNames, container, W) {
 
   const xMid     = _f(M.l + pw / 2);
   const isZoomed = _zoom.i0 > 0.001 || _zoom.i1 < 0.999;
-  const zoomTxt  = isZoomed
-    ? `Rank ${r0+1}–${r1+1} · drag to pan · scroll to zoom · dbl-click reset`
-    : `Scroll to zoom · drag to pan · dbl-click reset`;
+  const zoomTxt = isZoomed
+    ? `Rank ${r0 + 1} – ${r1 + 1}`
+    : '';
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"
   viewBox="0 0 ${W} ${SVG_H}" width="${W}" height="${SVG_H}"
@@ -460,121 +460,110 @@ export function renderESStats(result, engine, showFDR) {
 export function drawNESChart(results, container) {
   if (!results || results.length === 0) return;
 
-  // Sort: positive NES descending, then negative NES descending (least negative last)
   const sorted = [...results].sort((a, b) => b.nes - a.nes);
 
-  const barH    = 18;
-  const gap     = 3;
-  const labelW  = 180;   // left label area
-  const valW    = 36;    // right value area
-  const padT    = 24;    // top padding (axis title)
-  const padB    = 28;    // bottom padding
-  const padL    = 10;
-  const padR    = 10;
+  // Issue (3): layout constants tuned for long names
+  const barH   = 20;
+  const gap    = 4;
+  const padT   = 20;
+  const padB   = 32;
+  const padL   = 8;
+  const padR   = 12;
+  // Value label width (right of bar)
+  const valW   = 52;
 
-  const nBars   = sorted.length;
-  const totalH  = padT + nBars * (barH + gap) + padB;
+  const nBars  = sorted.length;
+  const totalH = padT + nBars * (barH + gap) + padB;
 
-  // Container width
-  const W = Math.max(container.clientWidth || 680, 500);
-  const chartW  = W - padL - labelW - valW - padR;
+  const W      = Math.max(container.clientWidth || 700, 500);
 
-  // Max absolute NES for scaling
-  const maxAbs  = sorted.reduce((m, r) => Math.max(m, Math.abs(r.nes)), 0) || 1;
+  // Issue (3): label area is 40% of total width, capped
+  const labelW = Math.min(Math.floor(W * 0.40), 260);
+  const chartW = W - padL - labelW - valW - padR;
 
-  // Zero line x in chart coordinates
-  const zeroX   = padL + labelW + chartW / 2;
+  const maxAbs = sorted.reduce((m, r) => Math.max(m, Math.abs(r.nes)), 0) || 1;
+  const zeroX  = padL + labelW + chartW / 2;
+  const scale  = v => (v / maxAbs) * (chartW / 2);
 
-  // Scale: NES → px offset from zeroX
-  const scale   = v => (v / maxAbs) * (chartW / 2);
-
-  // Build bar rows
   const barRows = sorted.map((r, i) => {
     const y      = padT + i * (barH + gap);
-    const yMid   = y + barH / 2;
+    const yMid   = y + barH / 2 + 4;
     const nes    = r.nes;
     const isPos  = nes >= 0;
-    const barPx  = scale(Math.abs(nes));
+    const barPx  = Math.max(scale(Math.abs(nes)), 1);
     const barX   = isPos ? zeroX : zeroX - barPx;
     const fill   = isPos ? '#1c6e41' : '#b01c1c';
-    const fillLt = isPos ? 'rgba(28,110,65,.15)' : 'rgba(176,28,28,.12)';
-    const textX  = isPos ? zeroX + barPx + 4 : zeroX - barPx - 4;
-    const textAnchor = isPos ? 'start' : 'end';
+    const fillBg = isPos ? 'rgba(28,110,65,.08)' : 'rgba(176,28,28,.07)';
 
-    // Significance star
     const star = r.pCauchy < 0.001 ? '***'
                : r.pCauchy < 0.01  ? '**'
                : r.pCauchy < 0.05  ? '*' : '';
 
-    // Truncated label
-    const label = r.name.length > 28
-      ? r.name.slice(0, 26) + '…'
-      : r.name;
+    // Issue (3): label rendered as SVG foreignObject for CSS ellipsis,
+    // falling back to SVG text with title for tooltip
+    const labelX   = padL + 4;
+    const labelMaxW = labelW - 10;
+
+    // Value shown to the right (positive) or left (negative) of bar
+    const nesStr   = nes.toFixed(2) + (star ? ' ' + star : '');
+    const valX     = isPos
+      ? zeroX + barPx + 4
+      : zeroX - barPx - 4;
+    const valAnchor = isPos ? 'start' : 'end';
 
     return `
-      <rect x="${_f(barX)}" y="${_f(y)}" width="${_f(barPx)}" height="${barH}"
-            fill="${fill}" opacity="0.82" rx="2"/>
-      <rect x="${padL}" y="${_f(y)}" width="${labelW - 6}" height="${barH}"
-            fill="${fillLt}" rx="2"/>
-      <text x="${padL + labelW - 8}" y="${_f(yMid + 4)}"
-            text-anchor="end" font-size="10" fill="#2a3040"
-            font-family="'Inter',sans-serif">${_esc(label)}</text>
-      <text x="${_f(textX)}" y="${_f(yMid + 4)}"
-            text-anchor="${textAnchor}" font-size="9.5"
-            font-family="'JetBrains Mono',monospace"
-            fill="${fill}" font-weight="500">
-        ${nes.toFixed(2)}${star ? ' ' + star : ''}
+      <rect x="${padL}" y="${y}" width="${labelW - 4}" height="${barH}"
+            fill="${fillBg}" rx="2"/>
+      <text x="${_f(labelX + labelMaxW)}" y="${_f(yMid)}"
+            text-anchor="end" font-size="10.5"
+            fill="#2a3040" font-family="'Inter',sans-serif">
+        <title>${_esc(r.name)}</title>
+        ${_esc(_truncate(r.name, 34))}
+      </text>
+      <rect x="${_f(barX)}" y="${_f(y + 2)}"
+            width="${_f(barPx)}" height="${barH - 4}"
+            fill="${fill}" opacity="0.80" rx="2"/>
+      <text x="${_f(valX)}" y="${_f(yMid)}"
+            text-anchor="${valAnchor}"
+            font-size="9.5" font-weight="500"
+            fill="${fill}"
+            font-family="'JetBrains Mono',monospace">
+        ${_esc(nesStr)}
       </text>`;
   }).join('');
 
-  // Axis tick labels
-  const nTicks  = 5;
-  const ticks   = Array.from({ length: nTicks * 2 + 1 }, (_, i) => {
-    const v = ((i - nTicks) / nTicks) * maxAbs;
-    const x = zeroX + scale(v);
-    return `
-      <line x1="${_f(x)}" y1="${padT - 6}" x2="${_f(x)}" y2="${padT + nBars*(barH+gap)}"
-            stroke="${Math.abs(v) < 1e-6 ? '#adb8c4' : '#e4e8ee'}"
-            stroke-width="${Math.abs(v) < 1e-6 ? 1.2 : 0.7}"
-            stroke-dasharray="${Math.abs(v) < 1e-6 ? '' : '3,4'}"/>
-      <text x="${_f(x)}" y="${padT - 9}"
-            text-anchor="middle" font-size="8.5" fill="#8090a8"
-            font-family="'JetBrains Mono',monospace">${v.toFixed(1)}</text>`;
-  }).join('');
+  // Issue (3): zero line only, no tick marks
+  const zeroLine = `
+    <line x1="${_f(zeroX)}" y1="${padT - 4}"
+          x2="${_f(zeroX)}" y2="${padT + nBars*(barH+gap)}"
+          stroke="#adb8c4" stroke-width="1.4"/>`;
 
-  const legendY = padT + nBars * (barH + gap) + 16;
+  // Legend
+  const legendY = padT + nBars * (barH + gap) + 18;
   const legend  = `
     <text x="${_f(W / 2)}" y="${legendY}"
-          text-anchor="middle" font-size="9.5" fill="#8090a8"
+          text-anchor="middle" font-size="9" fill="#8090a8"
           font-family="'Inter',sans-serif">
-      NES (Normalized Enrichment Score) · * p&lt;0.05 · ** p&lt;0.01 · *** p&lt;0.001
+      NES · * p&lt;0.05 · ** p&lt;0.01 · *** p&lt;0.001 (Cauchy)
     </text>`;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg"
   viewBox="0 0 ${W} ${totalH}" width="${W}" height="${totalH}"
   id="nes-svg" style="font-family:'Inter',sans-serif"
   role="img" aria-label="NES bar chart">
-
   <rect width="${W}" height="${totalH}" fill="#fafbfc"/>
-
-  <!-- Chart title -->
-  <text x="${_f(zeroX)}" y="16" text-anchor="middle"
-        font-size="11" font-weight="600" fill="#3a4151"
-        font-family="'Inter',sans-serif">
-    Normalized Enrichment Score (NES)
-  </text>
-
-  <!-- Grid + axis ticks -->
-  ${ticks}
-
-  <!-- Bars + labels -->
+  ${zeroLine}
   ${barRows}
-
-  <!-- Legend -->
   ${legend}
 </svg>`;
 
   container.innerHTML = svg;
+}
+
+// Truncate string to maxLen characters with ellipsis
+function _truncate(s, maxLen) {
+  if (!s) return '';
+  return s.length <= maxLen ? s : s.slice(0, maxLen - 1) + '…';
 }
 
 // ── PNG export helpers ────────────────────────────────────────
