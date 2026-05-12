@@ -50,7 +50,7 @@
       <div class="dz-icon">📊</div>
       <div class="dz-hint">
         Drop CSV, TSV, or TXT here<br>
-        <span class="hint-sub">rows = genes &nbsp; cols = samples</span>
+        <span class="hint-sub">rows = genes  cols = samples</span>
       </div>
       <div class="dz-name"  id="fn-expr"></div>
       <div class="dz-stats" id="st-expr"></div>
@@ -63,7 +63,7 @@
       <input type="file" id="fi-path" accept=".gmt,.txt">
       <div class="dz-icon">🧬</div>
       <div class="dz-hint">
-        Drop MSigDB GMT or TXT here
+        Drop MSigDB GMT or TXT here<br>
       </div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
@@ -201,7 +201,7 @@
           <input type="checkbox" id="chk-extra"> Extended columns
         </label>
         <button class="btn-secondary btn-sm" id="btn-dl">⬇ Export CSV</button>
-        <button class="btn-secondary btn-sm" id="btn-export-curves"
+        <button class="btn-secondary btn-sm" id="btn-dl-curves"
                 title="Export all enrichment score curves as PNG images">
           🖼 Export curves
         </button>
@@ -222,21 +222,12 @@
       </table>
     </div>
 
-    <!-- NES bar chart (shown when > 10 pathways) -->
+    <!-- NES bar chart (shown when >10 pathways) -->
     <div class="nes-chart-section" id="nes-chart-section" style="display:none">
-      <div class="plot-toolbar">
-        <div class="plot-title-group">
-          <span class="plot-lbl">NES Overview</span>
-          <span class="plot-name" style="font-size:12px;color:var(--muted)">
-            Normalized Enrichment Score (all pathways)
-          </span>
-        </div>
-        <div class="plot-controls">
-          <button class="btn-secondary btn-sm" id="btn-dl-nes"
-                  title="Download NES bar chart as PNG">⬇ PNG</button>
-        </div>
+      <div class="plot-toolbar" style="margin-bottom:8px">
+        <span class="plot-lbl">NES Overview — Ranked by NES</span>
       </div>
-      <div id="nes-chart-wrap" class="svg-wrap"></div>
+      <div id="nes-chart-wrap"></div>
     </div>
 
     <div class="plot-section" id="plot-section" style="display:none">
@@ -254,7 +245,7 @@
         <div class="plot-controls">
           <button class="btn-secondary btn-sm" id="btn-reset-zoom"
                   title="Reset zoom to full view">⊡ Reset zoom</button>
-          <button class="btn-secondary btn-sm" id="btn-dl-curve"
+          <button class="btn-secondary btn-sm" id="btn-dl-one-curve"
                   title="Download this enrichment curve as PNG">⬇ PNG</button>
           <span class="plot-hint">scroll/drag to zoom &amp; pan · dbl-click reset</span>
         </div>
@@ -273,17 +264,17 @@
         <em>[Our paper — citation to be added upon publication]</em>
       </li>
       <li>
-        Lin J, <em>et al.</em> (2002).
-        Transcriptional co-activator PGC-1α drives the formation of slow-twitch
-        muscle fibres.
-        <em>Nature</em>, 418, 797–801.
-        <a href="https://doi.org/10.1038/nature00904"
-           target="_blank" rel="noopener">doi:10.1038/nature00904</a>
+        Mootha VK, <em>et al.</em> (2003).
+        PGC-1α-responsive genes involved in oxidative phosphorylation are
+        coordinately downregulated in human diabetes.
+        <em>Nature Genetics</em>, 34(3), 267–273.
+        <a href="https://doi.org/10.1038/ng1180"
+           target="_blank" rel="noopener">doi:10.1038/ng1180</a>
       </li>
       <li>
         Subramanian A, <em>et al.</em> (2005).
-        Gene set enrichment analysis: a knowledge-based approach for interpreting
-        genome-wide expression profiles.
+        Gene set enrichment analysis: a knowledge-based approach for
+        interpreting genome-wide expression profiles.
         <em>PNAS</em>, 102(43), 15545–15550.
         <a href="https://doi.org/10.1073/pnas.0506580102"
            target="_blank" rel="noopener">doi:10.1073/pnas.0506580102</a>
@@ -298,7 +289,7 @@
       </li>
       <li>
         Liberzon A, <em>et al.</em> (2015).
-        The Molecular Signatures Database hallmark gene set collection.
+        The Molecular Signatures Database (MSigDB) hallmark gene set collection.
         <em>Cell Systems</em>, 1(6), 417–425.
         <a href="https://doi.org/10.1016/j.cels.2015.12.004"
            target="_blank" rel="noopener">doi:10.1016/j.cels.2015.12.004</a>
@@ -308,9 +299,8 @@
       GMT files:
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
          target="_blank" rel="noopener">MSigDB Collections</a>
-      · MSigDB data is available for academic non-commercial use under the
-      <a href="https://www.gsea-msigdb.org/gsea/msigdb/license_agreement.jsp"
-         target="_blank" rel="noopener">MSigDB license</a>.
+      (CC BY 4.0 for academic use; commercial use requires a separate
+      agreement with the Broad Institute).
     </p>
   </div>
 
