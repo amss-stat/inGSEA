@@ -1,43 +1,55 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  iGSEA application entry
+//  main.js  ·  iGSEA v2.3 application entry
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import { runGSEA }          from './core/gsea.js';
-import { initWebR }         from './core/webr-bridge.js';
 import {
   parseExpr, parseGMT, buildMasks, setupDropZone
 }                           from './ui/fileio.js';
 import {
-  drawCurve, updatePlotHeader, renderESStats
+  drawCurve, updatePlotHeader, renderESStats, resetZoom
 }                           from './ui/plot.js';
 import { renderTable }      from './ui/table.js';
 import {
   log, setProgress, showProgress, setFileLoaded,
   populateSelectors, setupModeTabs, getSelectedPathways,
-  setRunEnabled, setWebRStatus, downloadCSV, generateDemo
+  setRunEnabled, downloadCSV, generateDemo
 }                           from './ui/controls.js';
 
 // ── State ────────────────────────────────────────────────────
 const S = {
-  exprMat:     null,
-  geneNames:   [],
-  sampleNames: [],
-  rawPathways: [],
-  pathwayList: [],
-  results:     null,
-  engine:      'parametric',
-  running:     false,
-  showFDR:     false
+  exprMat:      null,
+  geneNames:    [],
+  sampleNames:  [],
+  rawPathways:  [],
+  pathwayList:  [],
+  results:      null,
+  engine:       'parametric',
+  running:      false,
+  showFDR:      false,
+  abortCtrl:    null    // AbortController for current run
 };
 
-// ── WebR (background, non-blocking) ──────────────────────────
-setWebRStatus('loading');
-initWebR(status => {
-  setWebRStatus(status);
-  if (status === 'ready') log('R engine ready (pure base R, no external packages)', 'ok');
-  if (status === 'error') log('R engine unavailable — parametric mode will fall back to permutation', 'warn');
-});
+// ── jStat status ─────────────────────────────────────────────
+function checkJStat() {
+  if (typeof jStat !== 'undefined') {
+    log('jStat loaded — parametric engine available', 'ok');
+    document.getElementById('jstat-status').textContent = 'jStat ✓';
+    document.getElementById('jstat-status').className   = 'jstat-badge ok';
+  } else {
+    log('jStat not available — parametric engine disabled', 'warn');
+    document.getElementById('jstat-status').textContent = 'jStat ✗';
+    document.getElementById('jstat-status').className   = 'jstat-badge err';
+    // Disable parametric option
+    const opt = document.querySelector('#sel-engine option[value="parametric"]');
+    if (opt) opt.disabled = true;
+    document.getElementById('sel-engine').value = 'permutation';
+    S.engine = 'permutation';
+  }
+}
+// jStat loads via <script> tag before this module; check after a tick
+setTimeout(checkJStat, 100);
 
 // ── UI setup ─────────────────────────────────────────────────
 setupModeTabs();
@@ -45,9 +57,29 @@ setupModeTabs();
 document.getElementById('sel-engine').addEventListener('change', e => {
   S.engine = e.target.value;
 });
-
 document.getElementById('chk-extra').addEventListener('change', e => {
   document.getElementById('rt').classList.toggle('show-ext', e.target.checked);
+});
+
+// ── Clear results ─────────────────────────────────────────────
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (S.running) return;
+  S.results = null;
+  S.showFDR = false;
+  document.getElementById('res-panel').style.display   = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('tbody').innerHTML = '';
+  document.getElementById('plot-section').style.display = 'none';
+  document.getElementById('prog-wrap').style.display    = 'none';
+  log('Results cleared', 'ok');
+});
+
+// ── Abort ────────────────────────────────────────────────────
+document.getElementById('btn-abort').addEventListener('click', () => {
+  if (!S.running || !S.abortCtrl) return;
+  S.abortCtrl.abort();
+  log('Abort requested — stopping after current chunk…', 'warn');
+  document.getElementById('btn-abort').disabled = true;
 });
 
 // ── File drops ───────────────────────────────────────────────
@@ -62,18 +94,14 @@ function _loadExpr(file) {
       S.geneNames   = gNames;
       S.sampleNames = sNames;
       S.exprMat     = mat;
-
       const note = transformed
         ? ` · log₂+1 (rawMax=${maxRaw.toFixed(0)})` : '';
       setFileLoaded('expr', file.name,
         `${gNames.length} genes × ${sNames.length} samples${note}`);
       log(`Expression: ${gNames.length}×${sNames.length}${note}`, 'ok');
-
-      // Smart nCase default
       const nc = document.getElementById('n-case');
       if (+nc.value === 10 && sNames.length !== 20)
         nc.value = Math.floor(sNames.length / 2);
-
       _rebuildMasks();
       _updateRun();
     } catch (err) { log(`Expression error: ${err.message}`, 'err'); }
@@ -85,34 +113,24 @@ function _loadPath(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      // Auto-detect GMT by checking if first line has ≥3 tab-separated fields
       const txt   = e.target.result;
       const first = txt.split('\n')[0] || '';
-      const nTabs = (first.match(/\t/g) ?? []).length;
-
-      let rp;
-      if (nTabs >= 2) {
-        rp = parseGMT(txt);
-      } else {
+      if ((first.match(/\t/g) ?? []).length < 2)
         throw new Error(
           'File does not appear to be GMT format.\n' +
-          'Expected tab-separated: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩…\n' +
-          'Download GMT files from MSigDB Collections.'
+          'Expected: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩gene2…'
         );
-      }
-
+      const rp = parseGMT(txt);
       S.rawPathways = rp;
       log(`Gene sets: ${rp.length} loaded from ${file.name}`, 'ok');
       _rebuildMasks();
-
       const nV = S.pathwayList.length;
       setFileLoaded('path', file.name,
         S.geneNames.length > 0
           ? `${nV} / ${rp.length} sets (≥10 matched genes)`
-          : `${rp.length} sets — load expression to match`
-      );
+          : `${rp.length} sets — load expression to match`);
       _updateRun();
-    } catch (err) { log(`Gene sets error: ${err.message}`, 'err'); }
+    } catch (err) { log(`Gene sets: ${err.message}`, 'err'); }
   };
   reader.readAsText(file);
 }
@@ -120,12 +138,14 @@ function _loadPath(file) {
 function _rebuildMasks() {
   if (!S.geneNames.length || !S.rawPathways.length) return;
   S.pathwayList = buildMasks(S.rawPathways, S.geneNames);
-  log(`Mask build: ${S.pathwayList.length} pathways with ≥10 matched genes`, 'ok');
+  log(`Masks: ${S.pathwayList.length} pathways with ≥10 matched genes`, 'ok');
   populateSelectors(S.pathwayList);
 }
 
 function _updateRun() {
   setRunEnabled(!S.running && !!S.exprMat && S.pathwayList.length > 0);
+  document.getElementById('btn-abort').disabled = !S.running;
+  document.getElementById('btn-clear').disabled = S.running;
 }
 
 // ── Run iGSEA ────────────────────────────────────────────────
@@ -137,46 +157,54 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
   const nCase  = +document.getElementById('n-case').value;
   const nPerms = Math.min(+document.getElementById('n-perms').value, 2000);
-  S.engine  = document.getElementById('sel-engine').value;
-  S.running = true;
+  S.engine   = document.getElementById('sel-engine').value;
+  S.running  = true;
+  S.abortCtrl = new AbortController();
+
   _updateRun();
   showProgress(true);
   setProgress(0, 'Starting', 'Initialising iGSEA…');
+  log(`iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · engine=${S.engine}`, 'ok');
 
-  log(`iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · ` +
-      `engine=${S.engine}`, 'ok');
   const t0 = performance.now();
-
   try {
     const results = await runGSEA({
-      exprMat:   S.exprMat,
-      geneNames: S.geneNames,
-      pathways:  paths,
+      exprMat:      S.exprMat,
+      geneNames:    S.geneNames,
+      pathways:     paths,
       nCase,
       nPerms,
-      engine:    S.engine,
-      onProgress: setProgress
+      engine:       S.engine,
+      abortSignal:  S.abortCtrl.signal,
+      onProgress:   setProgress
     });
 
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
     setProgress(100, 'Done', `iGSEA complete in ${sec}s`);
-    log(`iGSEA complete: ${results.length} pathway(s) in ${sec}s`, 'ok');
+    log(`iGSEA done: ${results.length} pathway(s) in ${sec}s`, 'ok');
 
     S.results = results;
     S.showFDR = results.length > 10;
     _renderResults(results);
 
   } catch (err) {
-    log(`Error: ${err.message}`, 'err');
-    setProgress(0, 'Error', err.message);
+    if (err.message === 'Aborted') {
+      log('iGSEA aborted by user', 'warn');
+      setProgress(0, 'Aborted', 'Analysis was stopped. Press Run iGSEA to restart.');
+    } else {
+      log(`Error: ${err.message}`, 'err');
+      setProgress(0, 'Error', err.message);
+    }
   }
 
-  S.running = false;
+  S.running  = false;
+  S.abortCtrl = null;
   _updateRun();
 });
 
 // ── Demo ─────────────────────────────────────────────────────
 document.getElementById('btn-demo').addEventListener('click', () => {
+  if (S.running) return;
   const d = generateDemo();
   Object.assign(S, {
     geneNames:   d.gNames,
@@ -192,8 +220,7 @@ document.getElementById('btn-demo').addEventListener('click', () => {
     `${d.pathwayList.length} synthetic gene sets`);
   populateSelectors(d.pathwayList);
   _updateRun();
-  log(`Demo loaded: ${d.gNames.length}×${d.sNames.length}, ` +
-      `${d.pathwayList.length} pathways`, 'ok');
+  log(`Demo: ${d.gNames.length}×${d.sNames.length}, ${d.pathwayList.length} pathways`, 'ok');
 });
 
 // ── Export ────────────────────────────────────────────────────
@@ -201,7 +228,7 @@ document.getElementById('btn-dl').addEventListener('click', () => {
   downloadCSV(S.results, S.engine);
 });
 
-// ── Render results ───────────────────────────────────────────
+// ── Render results ────────────────────────────────────────────
 function _renderResults(results) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('res-panel').style.display   = 'block';
@@ -209,7 +236,7 @@ function _renderResults(results) {
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
   document.getElementById('res-engine-badge').textContent =
     S.engine === 'parametric'
-      ? 'Parametric Approximation (Γ + GΓ)'
+      ? 'Parametric Approximation (Γ + GΓ via jStat)'
       : 'Permutation';
 
   renderTable(results, S.showFDR, S.engine, _selectPathway);
@@ -236,5 +263,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-// ── Init ─────────────────────────────────────────────────────
-log('iGSEA v2.2 ready — load files or click ⚡ Demo', 'ok');
+log('iGSEA v2.3 ready — load files or click ⚡ Demo', 'ok');
