@@ -561,3 +561,50 @@ td.cpname { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
   font-size: 14px;   /* was 10px */
   padding: 1px 4px;
 }
+
+/* Browser note */
+.browser-note {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surf2);
+  white-space: nowrap;
+  cursor: help;
+}
+
+/* FDR note */
+.fdr-note {
+  font-size: 11px;
+  color: var(--amber);
+  background: var(--amber-lt);
+  border: 1px solid #e8c97a;
+  border-radius: var(--r-sm);
+  padding: 7px 11px;
+  margin-bottom: 10px;
+  line-height: 1.7;
+}
+
+/* Plot controls row */
+.plot-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Larger plot button */
+.btn-plot {
+  font-size: 15px;
+  padding: 1px 5px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--muted2);
+  border-radius: 2px;
+  transition: color .12s;
+  vertical-align: middle;
+  line-height: 1;
+}
+.btn-plot:hover { color: var(--blue); }
