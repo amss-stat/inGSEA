@@ -20,42 +20,46 @@ function _js() {
   return jStat;
 }
 
-// ── Nelder-Mead (unchanged) ───────────────────────────────────
+// ── Nelder-Mead simplex optimizer ────────────────────────────
 export function nelderMead(f, x0, opts = {}) {
   const {
-    maxIter  = 3000,
+    maxIter = 3000,
     maxCalls = 50000,
-    tol      = 1e-10,
-    alpha    = 1.0,
-    gamma    = 2.0,
-    rho      = 0.5,
-    sigma    = 0.5
+    tol     = 1e-10,
+    alpha   = 1.0,
+    gamma   = 2.0,
+    rho     = 0.5,
+    sigma   = 0.5
   } = opts;
 
   const n = x0.length;
   let calls = 0;
   const _f = x => { calls++; return f(x); };
 
-  let s  = [x0.slice()];
+  // Initial simplex
+  let s = [x0.slice()];
   for (let i = 0; i < n; i++) {
     const v = x0.slice();
-    v[i] += Math.abs(v[i]) > 1e-8 ? 0.05 * Math.abs(v[i]) : 0.00025;
+    v[i] += (Math.abs(v[i]) > 1e-8) ? 0.05 * Math.abs(v[i]) : 0.00025;
     s.push(v);
   }
   let fv = s.map(_f);
 
   for (let iter = 0; iter < maxIter && calls < maxCalls; iter++) {
+    // Sort
     const idx = Array.from({ length: n + 1 }, (_, i) => i);
     idx.sort((a, b) => fv[a] - fv[b]);
-    s  = idx.map(i => s[i]);
+    s = idx.map(i => s[i]);
     fv = idx.map(i => fv[i]);
 
     if (fv[n] - fv[0] < tol) break;
 
+    // Centroid of all but worst
     const c = new Array(n).fill(0);
     for (let i = 0; i < n; i++)
       for (let j = 0; j < n; j++) c[j] += s[i][j] / n;
 
+    // Reflect
     const xr = c.map((ci, j) => ci + alpha * (ci - s[n][j]));
     const fr = _f(xr);
 
@@ -83,46 +87,46 @@ export function nelderMead(f, x0, opts = {}) {
   return { x: s[0], fval: fv[0] };
 }
 
-// ── GG log-pdf ────────────────────────────────────────────────
-// log f(t; μ, σ, Q):
-//   w = (log t − μ) / σ
-//   k = 1/Q²
-//   u = k · exp(Q·w)
-//   log f = log|Q| + k·log(k) − logΓ(k) − log σ − log t + k·Q·w − u
+// ── Generalised Gamma (flexsurv parameterisation) ─────────────
 //
-// Q → 0 limit: log-Normal(μ, σ)
+//  log f(t; μ, σ, Q):
+//    w = (log t − μ) / σ
+//    k = 1/Q²
+//    u = k · exp(Q·w)
+//    log f = log|Q| + k·log k − logΓ(k) − log σ − log t + k·Q·w − u
+//
+//  Q → 0: log-normal(μ, σ)
 
 function ggLogPdf(t, mu, sigma, Q) {
   if (t <= 0 || sigma <= 0) return -Infinity;
-  const js  = _js();
   const lnt = Math.log(t);
+  const js  = _js();
 
   if (Math.abs(Q) < 1e-8) {
     const z = (lnt - mu) / sigma;
-    return -lnt - Math.log(sigma)
-           - 0.5 * Math.log(2 * Math.PI)
-           - 0.5 * z * z;
+    return -lnt - Math.log(sigma) - 0.5 * Math.log(2 * Math.PI) - 0.5 * z * z;
   }
 
-  const k  = 1.0 / (Q * Q);
-  const w  = (lnt - mu) / sigma;
+  const k = 1.0 / (Q * Q);
+  const w = (lnt - mu) / sigma;
+  // Guard against overflow: Q*w can be large
   const Qw = Q * w;
-  if (Qw > 700) return -Infinity;   // exp(Qw) would overflow → density ≈ 0
+  if (Qw > 700) return -Infinity;  // exp(Qw) would overflow
   const u = k * Math.exp(Qw);
   if (!isFinite(u) || u < 0) return -Infinity;
 
   return Math.log(Math.abs(Q))
-       + k * Math.log(k)
-       - js.gammaln(k)          // ← was js.lngamma(k)  — FIXED
-       - Math.log(sigma)
-       - lnt
-       + k * Qw
-       - u;
+    + k * Math.log(k)
+    - js.lngamma(k)
+    - Math.log(sigma)
+    - lnt
+    + k * Qw
+    - u;
 }
 
 function ggNegLL(par, data) {
   const mu    = par[0];
-  const sigma = Math.exp(par[1]);
+  const sigma = Math.exp(par[1]);   // log-transform: sigma > 0 always
   const Q     = par[2];
   if (sigma < 1e-8 || sigma > 100) return 1e15;
   let ll = 0;
@@ -134,12 +138,15 @@ function ggNegLL(par, data) {
   return isFinite(ll) ? -ll : 1e15;
 }
 
-// ── GG survival: P(T > x | μ, σ, Q) ──────────────────────────
-// Uses jStat.gammainc(u, k) = P(k, u) = lower regularised gamma
-//   Q > 0: S(x) = 1 − P(k, u)
-//   Q < 0: S(x) = P(k, u)
-//   Q = 0: log-normal upper tail
-
+/**
+ * GG survival: P(T > x | μ, σ, Q).
+ * Uses jStat.gammainc for the regularised incomplete gamma.
+ *
+ * jStat.gammainc(x, a) = P(a,x) = lower regularised gamma
+ *   Q > 0: P(T > x) = 1 − P(k, u)  [upper tail of Gamma(k,1)]
+ *   Q < 0: P(T > x) = P(k, u)       [lower tail, direction flips]
+ *   Q = 0: log-normal upper tail
+ */
 export function ggSurvival(x, mu, sigma, Q) {
   if (x <= 0) return 1;
   const js = _js();
@@ -156,12 +163,16 @@ export function ggSurvival(x, mu, sigma, Q) {
   const u = k * Math.exp(Qw);
   if (!isFinite(u) || u < 0) return Q > 0 ? 1 : 0;
 
+  // jStat.gammainc(u, k) = P(k, u) = lower regularised gamma
   const lowerP = js.gammainc(u, k);
-  const p      = Q > 0 ? 1 - lowerP : lowerP;
+  const p = Q > 0 ? 1 - lowerP : lowerP;
   return Math.max(0, Math.min(1, p));
 }
 
-// ── Fit GG via Nelder-Mead MLE ────────────────────────────────
+/**
+ * Fit GG to positive data using Nelder-Mead MLE.
+ * Returns { mu, sigma, Q, ok }.
+ */
 export function fitGenGamma(data) {
   const pos = data.filter(v => v > 0);
   if (pos.length < 10) return { ok: false };
@@ -172,7 +183,7 @@ export function fitGenGamma(data) {
   const varS = logD.reduce((s, v) => s + (v - muS) ** 2, 0) / (n - 1);
   const sigS = Math.max(Math.sqrt(varS), 1e-4);
 
-  // Three starts to avoid local minima (Q < 0, Q ≈ 0, Q > 0)
+  // Multiple starts: Q = -1, 0, 1 to avoid local minima
   const starts = [
     [muS, Math.log(sigS), -1.0],
     [muS, Math.log(sigS),  0.1],
@@ -181,12 +192,9 @@ export function fitGenGamma(data) {
 
   let best = null;
   for (const start of starts) {
-    const res = nelderMead(
-      par => ggNegLL(par, pos),
-      start,
-      { maxIter: 3000, tol: 1e-10 }
-    );
-    if (!best || res.fval < best.fval) best = res;
+    const res = nelderMead(par => ggNegLL(par, pos), start,
+      { maxIter: 3000, tol: 1e-10 });
+    if (best === null || res.fval < best.fval) best = res;
   }
 
   if (!best || !isFinite(best.fval)) return { ok: false };
@@ -196,10 +204,14 @@ export function fitGenGamma(data) {
   const Q     = best.x[2];
 
   if (sigma < 1e-8 || sigma > 50) return { ok: false };
+
   return { mu, sigma, Q, ok: true };
 }
 
-// ── p-value for AD from GG fit ────────────────────────────────
+/**
+ * Upper-tail p-value for AD from GG fit.
+ * Scales data by mean (matching R reference script).
+ */
 export function pvalGG(obsAD, nullAD, empP) {
   try {
     const n = nullAD.length;
@@ -216,32 +228,36 @@ export function pvalGG(obsAD, nullAD, empP) {
     if (!fit.ok) return empP;
 
     const p = ggSurvival(sObs, fit.mu, fit.sigma, fit.Q);
-    return isFinite(p) && p >= 0 && p <= 1
-      ? Math.max(p, 1e-16) : empP;
+    return isFinite(p) && p >= 0 && p <= 1 ? Math.max(p, 1e-16) : empP;
   } catch { return empP; }
 }
 
-// ── Gamma log-likelihood (numerically stable) ─────────────────
-// log f(x; k, r) = (k−1)·log x + k·log r − r·x − logΓ(k)
-// Parameters: [log k, log r]  (log-transform ensures positivity)
+// ── Gamma distribution for |KS| null ─────────────────────────
+//
+// Uses direct log-likelihood (numerically stable):
+//   log f(x; k, r) = (k-1)·log(x) + k·log(r) - r·x - logΓ(k)
+// with log-transformed parameters: par = [log(k), log(r)]
 
 function gammaNegLL(logPar, data) {
-  const k = Math.exp(logPar[0]);
-  const r = Math.exp(logPar[1]);
+  const k = Math.exp(logPar[0]);   // shape
+  const r = Math.exp(logPar[1]);   // rate
   if (!isFinite(k) || !isFinite(r) || k < 1e-6 || r < 1e-6) return 1e15;
-  const js     = _js();
-  const lnGamK = js.gammaln(k);   // ← was js.lngamma(k)  — FIXED
-  const lnR    = logPar[1];
+  const js = _js();
+  const lnGamK = js.lngamma(k);
+  const lnR    = logPar[1];   // = log(r)
   let ll = 0;
   for (let i = 0; i < data.length; i++) {
     const x = data[i];
     if (x <= 0) return 1e15;
+    // log f = (k-1)*log(x) + k*log(r) - r*x - lgamma(k)
     ll += (k - 1) * Math.log(x) + k * lnR - r * x - lnGamK;
   }
   return isFinite(ll) ? -ll : 1e15;
 }
 
-// ── Fit Gamma to positive data ────────────────────────────────
+/**
+ * Fit Gamma(shape, rate) to positive data via MLE.
+ */
 export function fitGamma(data) {
   const pos = data.filter(v => v > 0);
   if (pos.length < 10) return { ok: false };
@@ -263,15 +279,16 @@ export function fitGamma(data) {
 
   const k = Math.exp(res.x[0]);
   const r = Math.exp(res.x[1]);
-  if (!isFinite(k) || !isFinite(r) || k <= 0 || r <= 0)
-    return { ok: false };
+  if (!isFinite(k) || !isFinite(r) || k <= 0 || r <= 0) return { ok: false };
   return { shape: k, rate: r, ok: true };
 }
 
-// ── p-value for KS from Gamma fit ────────────────────────────
-// Two-sided: P(|X| ≥ |obs|) = upper tail of Gamma fitted to |null_KS|
-// jStat.gamma.cdf(x, shape, scale) where scale = 1/rate
-
+/**
+ * Two-sided p-value for KS from Gamma fit on |null_KS|.
+ * P(|X| ≥ |obs|) = 1 − CDF_Gamma(|obs|; shape, rate)
+ *
+ * jStat.gamma.cdf(x, shape, scale) where scale = 1/rate.
+ */
 export function pvalGamma(obsKS, nullKS, empP) {
   try {
     const js = _js();
@@ -283,7 +300,6 @@ export function pvalGamma(obsKS, nullKS, empP) {
     if (!fit.ok) return empP;
 
     const p = 1 - js.gamma.cdf(Math.abs(obsKS), fit.shape, 1 / fit.rate);
-    return isFinite(p) && p >= 0 && p <= 1
-      ? Math.max(p, 1e-16) : empP;
+    return isFinite(p) && p >= 0 && p <= 1 ? Math.max(p, 1e-16) : empP;
   } catch { return empP; }
 }
