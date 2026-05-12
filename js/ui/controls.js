@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/controls.js  ·  v2.6
+//  ui/controls.js  ·  v2.7
+//  Changes from v2.6:
+//  • CSV export: removed pKS_par column (always null)
+//  • CSV header clarifies pKS is always permutation-based
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -98,9 +101,10 @@ export function downloadCSV(results, engine) {
     'Pathway', 'Size',
     'NES_KS', 'NES_AD',
     'ES', 'AD',
-    'pKS', 'pAD',          // combined (par if available, else emp)
-    ...(isP ? ['pKS_par', 'pAD_par'] : []),  // parametric only
-    'pKS_emp', 'pAD_emp',  // always empirical
+    'pKS_perm',                     // KS is always permutation
+    'pAD',                          // combined (par if available, else perm)
+    ...(isP ? ['pAD_par'] : []),    // parametric AD only when engine=parametric
+    'pAD_perm',                     // always empirical AD
     'pCauchy', 'FDR'
   ];
 
@@ -117,10 +121,9 @@ export function downloadCSV(results, engine) {
       r.nes_ad.toFixed(6),
       r.es.toFixed(6),
       r.ad.toFixed(4),
-      fp(r.pKS),
-      fp(r.pAD),
-      ...(isP ? [fp(r.pKS_par), fp(r.pAD_par)] : []),
-      fp(r.pKS_emp),
+      fp(r.pKS),                    // always = pKS_emp
+      fp(r.pAD),                    // par if fitted, else emp
+      ...(isP ? [fp(r.pAD_par)] : []),
       fp(r.pAD_emp),
       fp(r.pCauchy),
       fp(r.fdr)
