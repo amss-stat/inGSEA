@@ -157,40 +157,44 @@ export async function runGSEA(opts) {
     pAD_arr = empArr.map(r => r.pAD_emp);
   }
 
-  // ── 5. Assemble ──────────────────────────────────────────────
-  onProgress(97, 'Assembling', 'Cauchy & FDR…');
-  await _yield();
+// ── 5. Assemble ──────────────────────────────────────────────
+onProgress(97, 'Assembling', 'Cauchy & FDR…');
+await _yield();
 
-  const results = pathways.map((p, pi) => {
-    const e  = empArr[pi];
-    const pC = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
-    return {
-      name:    p.name,
-      url:     p.url ?? null,
-      size:    p.size,
-      es:      e.ok,
-      ad:      e.oa,
-      nes:     e.nes,
-      nes_ad:  e.nes_ad,
-      pKS_emp: e.pKS_emp,
-      pAD_emp: e.pAD_emp,
-      pKS:     pKS_arr[pi],
-      pAD:     pAD_arr[pi],
-      pCauchy: pC,
-      fdr:     null,
-      curve:   obsStats[pi].curve,
-      obsOrd,
-      peakIdx: obsStats[pi].peakIdx
-    };
-  });
+const results = pathways.map((p, pi) => {
+  const e    = empArr[pi];
+  // Issue (6) fix: store parametric and empirical separately.
+  // pKS/pAD are the parametric values when engine=parametric,
+  // otherwise they equal the empirical values.
+  // pKS_par/pAD_par are null when engine=permutation so that
+  // the CSV export can distinguish them from empirical values.
+  const pKS_par = useParam ? pKS_arr[pi] : null;
+  const pAD_par = useParam ? pAD_arr[pi] : null;
+  const pKS     = pKS_arr[pi];   // already correct: parametric if useParam, else emp
+  const pAD     = pAD_arr[pi];   // same
 
-  // BH-FDR on pCauchy
-  if (results.length > 1) {
-    const pv = results.map(r => r.pCauchy);
-    const qv = bhFDR(pv);
-    results.forEach((r, i) => { r.fdr = qv[i]; });
-  }
-
+  const pC = cauchyCombine(pKS, pAD);
+  return {
+    name:    p.name,
+    url:     p.url ?? null,
+    size:    p.size,
+    es:      e.ok,
+    ad:      e.oa,
+    nes:     e.nes,
+    nes_ad:  e.nes_ad,
+    pKS_emp: e.pKS_emp,   // always empirical
+    pAD_emp: e.pAD_emp,   // always empirical
+    pKS_par,              // parametric or null
+    pAD_par,              // parametric or null
+    pKS,                  // used for Cauchy: parametric if available
+    pAD,                  // used for Cauchy: parametric if available
+    pCauchy: pC,
+    fdr:     null,
+    curve:   obsStats[pi].curve,
+    obsOrd,
+    peakIdx: obsStats[pi].peakIdx
+  };
+});
   onProgress(100, 'Done', `${results.length} pathway(s) complete`);
   return results;
 }
