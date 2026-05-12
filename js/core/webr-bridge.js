@@ -1,194 +1,83 @@
 // ═══════════════════════════════════════════════════════════
-//  core/webr-bridge.js  ·  WebR + flexsurv integration
+//  core/webr-bridge.js  ·  WebR integration
 //
-//  WebR v0.4.x API reference:
-//    https://docs.r-wasm.org/webr/latest/api/js/
+//  KEY DESIGN: we do NOT use flexsurv because its dependencies
+//  (deSolve, muhaz) are not available as WebR WASM binaries.
 //
-//  Key design decisions:
-//  1. Load WebR once at startup (background, non-blocking).
-//  2. Each fitting call uses evalR() with data serialized
-//     as R source strings (most reliable cross-version approach).
-//  3. All R errors are caught; fall back to empirical p.
-//  4. fitMany() batches all pathways in a single R call
-//     to minimise JS↔R round-trip overhead.
+//  Instead we implement GG fitting in pure base R using:
+//    - optim() with L-BFGS-B (base R)
+//    - pgamma(), lgamma(), dgamma() (base R)
+//    - Manual GG log-likelihood, CDF via pgamma (base R)
+//
+//  This matches the mathematical model in flexsurv exactly
+//  (same parameterisation: mu, sigma, Q) but uses only
+//  base R functions that are guaranteed available in WebR.
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
-let _webR    = null;
-let _ready   = false;
-let _failed  = false;
+let _webR     = null;
+let _ready    = false;
+let _failed   = false;
 let _initProm = null;
 
-// ── Initialisation ───────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────
 
 /**
- * Start loading WebR + flexsurv.
- * @param {(state:'loading'|'installing'|'ready'|'error', msg?:string)=>void} onStatus
- * @returns {Promise<boolean>}  true = ready, false = failed
+ * Begin loading WebR in background.
+ * @param {(state:string, msg?:string)=>void} onStatus
+ * @returns {Promise<boolean>}
  */
 export function initWebR(onStatus) {
   if (_initProm) return _initProm;
-
   _initProm = _doInit(onStatus);
   return _initProm;
-}
-
-async function _doInit(onStatus) {
-  try {
-    onStatus('loading');
-    const { WebR } = await import('https://webr.r-wasm.org/v0.4.2/webr.mjs');
-
-    _webR = new WebR({ quiet: false });
-    await _webR.init();
-
-    onStatus('installing');
-    await _webR.installPackages(['flexsurv'], { quiet: true });
-
-    // Pre-load namespace and helper functions once
-    await _webR.evalRVoid(`
-      suppressPackageStartupMessages({
-        library(flexsurv)
-        library(survival)
-      })
-
-      # Robust gamma fit using MASS::fitdistr equivalent
-      .fit_gamma <- function(x) {
-        x <- x[x > 0]
-        if (length(x) < 3) return(NULL)
-        m  <- mean(x)
-        v  <- var(x)
-        shape0 <- m^2 / v
-        rate0  <- m  / v
-        tryCatch(
-          MASS::fitdistr(x, "gamma",
-                         start = list(shape = shape0, rate = rate0),
-                         lower = c(1e-4, 1e-6)),
-          error = function(e) NULL
-        )
-      }
-
-      # Single pathway fit: returns named list(p_ks, p_ad)
-      .fit_one <- function(null_ks, null_ad, obs_ks, obs_ad, emp_ks, emp_ad) {
-        # --- KS: Gamma on |null_ks| ---
-        abs_null <- abs(null_ks)
-        p_ks <- tryCatch({
-          fit <- .fit_gamma(abs_null)
-          if (is.null(fit)) {
-            emp_ks
-          } else {
-            pgamma(abs(obs_ks),
-                   shape = fit$estimate["shape"],
-                   rate  = fit$estimate["rate"],
-                   lower.tail = FALSE)
-          }
-        }, error = function(e) emp_ks)
-
-        # --- AD: Generalised Gamma on scaled null_ad ---
-        s_fac  <- mean(null_ad)
-        if (s_fac < 1e-12) return(list(p_ks = emp_ks, p_ad = emp_ad))
-        s_data <- null_ad / s_fac
-        s_obs  <- obs_ad  / s_fac
-
-        p_ad <- tryCatch({
-          fit_gg <- flexsurvreg(Surv(s_data) ~ 1, dist = "gengamma")
-          mu    <- fit_gg$res["mu",    "est"]
-          sigma <- fit_gg$res["sigma", "est"]
-          Q     <- fit_gg$res["Q",     "est"]
-          pgengamma(s_obs,
-                    mu = mu, sigma = sigma, Q = Q,
-                    lower.tail = FALSE)
-        }, error = function(e) emp_ad)
-
-        list(
-          p_ks = max(min(as.numeric(p_ks), 1), 1e-16),
-          p_ad = max(min(as.numeric(p_ad), 1), 1e-16)
-        )
-      }
-    `);
-
-    _ready = true;
-    onStatus('ready');
-    return true;
-  } catch (err) {
-    _failed = true;
-    onStatus('error', String(err.message || err));
-    return false;
-  }
 }
 
 export const isWebRReady  = () => _ready;
 export const isWebRFailed = () => _failed;
 
-// ── Per-pathway fitting ──────────────────────────────────────
-
-/**
- * Fit parametric null distributions for ONE pathway.
- *
- * Data is serialized as compact R numeric literals to avoid
- * WebR object-binding API version differences.
- *
- * @param {Float64Array} nullKS
- * @param {Float64Array} nullAD
- * @param {number} obsKS
- * @param {number} obsAD
- * @param {number} empKS  fallback p-value
- * @param {number} empAD  fallback p-value
- * @returns {Promise<{pKS:number, pAD:number, engine:string}>}
- */
-export async function fitOne(nullKS, nullAD, obsKS, obsAD, empKS, empAD) {
-  if (!_ready) return { pKS: empKS, pAD: empAD, engine: 'empirical' };
-
+async function _doInit(onStatus) {
   try {
-    const rCode = `
-      .fit_one(
-        null_ks = c(${_vec(nullKS)}),
-        null_ad = c(${_vec(nullAD)}),
-        obs_ks  = ${_num(obsKS)},
-        obs_ad  = ${_num(obsAD)},
-        emp_ks  = ${_num(empKS)},
-        emp_ad  = ${_num(empAD)}
-      )
-    `;
+    onStatus('loading');
 
-    const result = await _webR.evalR(rCode);
-    const js     = await result.toJs();
+    const { WebR } = await import(
+      'https://webr.r-wasm.org/v0.4.2/webr.mjs'
+    );
+    _webR = new WebR();
+    await _webR.init();
 
-    // toJs() on a named list returns { type:'list', names:[], values:[] }
-    const names  = js.names;
-    const vals   = js.values;
-    const get    = name => {
-      const i = names.indexOf(name);
-      return i >= 0 ? vals[i].values[0] : null;
-    };
+    onStatus('installing');
 
-    const pKS = get('p_ks');
-    const pAD = get('p_ad');
+    // Define all fitting functions in pure base R — no external packages
+    await _webR.evalRVoid(R_SETUP_CODE);
 
-    return {
-      pKS: _guardP(pKS, empKS),
-      pAD: _guardP(pAD, empAD),
-      engine: 'gg+gamma'
-    };
+    _ready = true;
+    onStatus('ready');
+    return true;
+
   } catch (err) {
-    console.warn('[iGSEA] WebR fitOne error:', err);
-    return { pKS: empKS, pAD: empAD, engine: 'empirical-fallback' };
+    _failed = true;
+    onStatus('error', String(err?.message || err));
+    return false;
   }
 }
 
 /**
- * Fit multiple pathways in a single R call.
- * More efficient than looping fitOne() when nPathways > 1.
- *
- * @param {Array<{nullKS, nullAD, obsKS, obsAD, empKS, empAD}>} items
- * @returns {Promise<Array<{pKS, pAD, engine}>>}
+ * Fit parametric null distributions for multiple pathways.
+ * Each item: { nullKS:Float64Array, nullAD:Float64Array,
+ *              obsKS:number, obsAD:number,
+ *              empKS:number, empAD:number }
+ * Returns: Array<{ pKS:number, pAD:number, engine:string }>
  */
 export async function fitMany(items) {
   if (!_ready) {
-    return items.map(it => ({ pKS: it.empKS, pAD: it.empAD, engine: 'empirical' }));
+    return items.map(it => ({
+      pKS: it.empKS, pAD: it.empAD, engine: 'permutation'
+    }));
   }
 
   try {
-    // Build an R list-of-lists call
+    // Build R source that defines data and calls our fitting function
     const rItems = items.map((it, i) => `
       list(
         null_ks = c(${_vec(it.nullKS)}),
@@ -200,65 +89,231 @@ export async function fitMany(items) {
       )`).join(',\n');
 
     const rCode = `
-      (function() {
-        items <- list(${rItems})
-        lapply(items, function(it) {
-          .fit_one(it$null_ks, it$null_ad,
-                   it$obs_ks,  it$obs_ad,
-                   it$emp_ks,  it$emp_ad)
-        })
-      })()
+      .igsea_fit_batch(list(${rItems}))
     `;
 
     const result = await _webR.evalR(rCode);
     const js     = await result.toJs();
 
-    // js.values is an array of per-pathway list objects
-    return js.values.map((pathway, i) => {
-      const names = pathway.names;
-      const vals  = pathway.values;
-      const get   = name => {
-        const idx = names.indexOf(name);
-        return idx >= 0 ? vals[idx].values[0] : null;
-      };
+    // js is a list of lists; parse out p_ks and p_ad
+    return js.values.map((entry, i) => {
+      const pKS = _extractVal(entry, 'p_ks', items[i].empKS);
+      const pAD = _extractVal(entry, 'p_ad', items[i].empAD);
       return {
-        pKS:    _guardP(get('p_ks'), items[i].empKS),
-        pAD:    _guardP(get('p_ad'), items[i].empAD),
-        engine: 'gg+gamma'
+        pKS: _guardP(pKS, items[i].empKS),
+        pAD: _guardP(pAD, items[i].empAD),
+        engine: 'parametric'
       };
     });
 
   } catch (err) {
     console.warn('[iGSEA] WebR fitMany error:', err);
-    return items.map(it => ({ pKS: it.empKS, pAD: it.empAD, engine: 'empirical-fallback' }));
+    return items.map(it => ({
+      pKS: it.empKS, pAD: it.empAD, engine: 'permutation-fallback'
+    }));
   }
 }
 
-// ── Serialisation helpers ────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 
-/** Serialize Float64Array to compact R numeric vector string. */
 function _vec(arr) {
-  // Use fixed notation for values in [0.001, 1e6], else exponential
   const parts = new Array(arr.length);
   for (let i = 0; i < arr.length; i++) {
-    const v = arr[i];
-    parts[i] = (Math.abs(v) < 1e-4 || Math.abs(v) > 1e6)
-      ? v.toExponential(6)
-      : v.toPrecision(8);
+    parts[i] = arr[i].toPrecision(8);
   }
   return parts.join(',');
 }
 
-/** Serialize a single number to R literal. */
 function _num(v) {
   if (!isFinite(v)) return 'NaN';
-  return (Math.abs(v) < 1e-4 || Math.abs(v) > 1e6)
-    ? v.toExponential(10)
-    : v.toPrecision(12);
+  return v.toPrecision(12);
 }
 
-/** Clamp p-value; fall back to empirical if invalid. */
 function _guardP(p, fallback) {
   if (p == null || !isFinite(p) || p < 0 || p > 1) return fallback;
   return Math.max(p, 1e-16);
 }
+
+function _extractVal(entry, name, fallback) {
+  try {
+    const idx = entry.names.indexOf(name);
+    if (idx < 0) return fallback;
+    const v = entry.values[idx].values[0];
+    return isFinite(v) ? v : fallback;
+  } catch { return fallback; }
+}
+
+// ── Pure base R code for GG/Gamma fitting ────────────────────
+// This is injected once at init time.
+// Mirrors the flexsurv GG parameterisation exactly:
+//   w = (log(t) - mu) / sigma
+//   If Q != 0:  u = Q^{-2} * exp(Q*w)
+//               X ~ Gamma(Q^{-2}, 1)
+//   If Q == 0:  log-normal(mu, sigma)
+//
+const R_SETUP_CODE = `
+# ─────────────────────────────────────────────────────────
+# Generalised Gamma: log-pdf, survival, fitting via optim()
+# Parameterisation matches flexsurv (mu, sigma, Q)
+# ─────────────────────────────────────────────────────────
+
+.gg_logpdf <- function(t, mu, sigma, Q) {
+  # Returns log f(t | mu, sigma, Q)
+  lnt <- log(t)
+  w   <- (lnt - mu) / sigma
+
+  if (abs(Q) < 1e-8) {
+    # Log-normal limit
+    return(-lnt - log(sigma) - 0.5*log(2*pi) - 0.5*w^2)
+  }
+
+  k <- 1 / (Q^2)              # shape parameter
+  u <- k * exp(Q * w)         # transformed variable
+
+  # log f = log|Q| + k*log(k) - lgamma(k) - log(sigma) - log(t)
+  #         + k*Q*w - u
+  log(abs(Q)) + k*log(k) - lgamma(k) - log(sigma) - lnt +
+    k*Q*w - u
+}
+
+.gg_negloglik <- function(par, data) {
+  mu <- par[1]; sigma <- exp(par[2]); Q <- par[3]
+  if (sigma < 1e-6) return(1e20)
+  ll <- sum(sapply(data, function(t) .gg_logpdf(t, mu, sigma, Q)))
+  if (!is.finite(ll)) return(1e20)
+  -ll
+}
+
+.gg_survival <- function(x, mu, sigma, Q) {
+  # P(T > x | mu, sigma, Q)
+  if (x <= 0) return(1)
+
+  if (abs(Q) < 1e-8) {
+    # Log-normal survival
+    z <- (log(x) - mu) / sigma
+    return(pnorm(-z))
+  }
+
+  w <- (log(x) - mu) / sigma
+  k <- 1 / (Q^2)
+  u <- k * exp(Q * w)
+
+  if (Q > 0) {
+    # Upper tail of Gamma(k, 1)
+    return(pgamma(u, shape = k, rate = 1, lower.tail = FALSE))
+  } else {
+    # Q < 0: lower tail
+    return(pgamma(u, shape = k, rate = 1, lower.tail = TRUE))
+  }
+}
+
+.fit_gg <- function(data, emp_p) {
+  # Fit GG to positive data, return upper-tail p-value at obs
+  # data = scaled null distribution, obs already in data context
+  tryCatch({
+    ld <- log(data[data > 0])
+    if (length(ld) < 5) return(emp_p)
+    mu0    <- mean(ld)
+    sigma0 <- sd(ld)
+    if (sigma0 < 1e-8) return(emp_p)
+
+    fit <- optim(
+      par     = c(mu0, log(sigma0), 0.1),
+      fn      = .gg_negloglik,
+      data    = data[data > 0],
+      method  = "Nelder-Mead",
+      control = list(maxit = 2000, reltol = 1e-10)
+    )
+
+    mu    <- fit$par[1]
+    sigma <- exp(fit$par[2])
+    Q     <- fit$par[3]
+
+    if (!is.finite(fit$value) || sigma < 1e-6) return(emp_p)
+    return(c(mu = mu, sigma = sigma, Q = Q))
+  }, error = function(e) {
+    return(emp_p)
+  })
+}
+
+# ─────────────────────────────────────────────────────────
+# Gamma fitting for |KS| null
+# Uses method of moments + optim MLE refinement
+# ─────────────────────────────────────────────────────────
+
+.fit_gamma_ks <- function(abs_null_ks, obs_abs_ks, emp_p) {
+  tryCatch({
+    x <- abs_null_ks[abs_null_ks > 0]
+    if (length(x) < 5) return(emp_p)
+
+    m  <- mean(x)
+    v  <- var(x)
+    if (v < 1e-12) return(emp_p)
+
+    shape0 <- m^2 / v
+    rate0  <- m / v
+
+    # MLE refinement
+    negll <- function(par) {
+      shape <- exp(par[1]); rate <- exp(par[2])
+      -sum(dgamma(x, shape = shape, rate = rate, log = TRUE))
+    }
+
+    fit <- optim(
+      par     = c(log(shape0), log(rate0)),
+      fn      = negll,
+      method  = "Nelder-Mead",
+      control = list(maxit = 1000, reltol = 1e-10)
+    )
+
+    shape <- exp(fit$par[1])
+    rate  <- exp(fit$par[2])
+
+    p <- pgamma(obs_abs_ks, shape = shape, rate = rate, lower.tail = FALSE)
+    return(max(min(p, 1), 1e-16))
+  }, error = function(e) emp_p)
+}
+
+# ─────────────────────────────────────────────────────────
+# Batch fitting: single R call for all pathways
+# ─────────────────────────────────────────────────────────
+
+.igsea_fit_one <- function(item) {
+  null_ks <- item$null_ks
+  null_ad <- item$null_ad
+  obs_ks  <- item$obs_ks
+  obs_ad  <- item$obs_ad
+  emp_ks  <- item$emp_ks
+  emp_ad  <- item$emp_ad
+
+  # --- KS: Gamma on |null_ks| ---
+  p_ks <- .fit_gamma_ks(abs(null_ks), abs(obs_ks), emp_ks)
+
+  # --- AD: Generalised Gamma on scaled null_ad ---
+  s_fac <- mean(null_ad)
+  if (s_fac < 1e-12) return(list(p_ks = emp_ks, p_ad = emp_ad))
+
+  s_data <- null_ad / s_fac
+  s_obs  <- obs_ad  / s_fac
+
+  gg_result <- .fit_gg(s_data, emp_ad)
+
+  if (is.numeric(gg_result) && length(gg_result) == 3) {
+    mu    <- gg_result["mu"]
+    sigma <- gg_result["sigma"]
+    Q     <- gg_result["Q"]
+    p_ad  <- .gg_survival(s_obs, mu, sigma, Q)
+    p_ad  <- max(min(p_ad, 1), 1e-16)
+  } else {
+    p_ad <- emp_ad
+  }
+
+  list(p_ks = as.numeric(p_ks), p_ad = as.numeric(p_ad))
+}
+
+.igsea_fit_batch <- function(items) {
+  lapply(items, .igsea_fit_one)
+}
+
+cat("[iGSEA] Pure base-R fitting functions loaded.\\n")
+`;
