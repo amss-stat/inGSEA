@@ -492,7 +492,7 @@ export function drawNESChart(results, container) {
 
   const maxAbs = sorted.reduce((m, r) => Math.max(m, Math.abs(r.nes)), 0) || 1;
   const zeroX  = padL + labelW + chartW / 2;
-  const scale  = v => (v / maxAbs) * (chartW / 2);
+  const scale  = v => (v / maxAbs) * (chartW / 4);
 
   const barRows = sorted.map((r, i) => {
     const y      = padT + i * (barH + gap);
