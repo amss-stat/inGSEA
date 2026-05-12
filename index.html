@@ -27,7 +27,7 @@
   </svg>
   <div class="hdr-brand">
     <div class="hdr-title">iGSEA</div>
-    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.4</div>
+    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.6</div>
   </div>
   <nav class="hdr-nav">
     <span class="jstat-badge" id="jstat-status">jStat…</span>
@@ -50,7 +50,7 @@
       <div class="dz-icon">📊</div>
       <div class="dz-hint">
         Drop CSV, TSV, or TXT here<br>
-        <span class="hint-sub">rows = genes  cols = samples</span>
+        <span class="hint-sub">rows = genes · cols = samples</span>
       </div>
       <div class="dz-name"  id="fn-expr"></div>
       <div class="dz-stats" id="st-expr"></div>
@@ -63,7 +63,7 @@
       <input type="file" id="fi-path" accept=".gmt,.txt">
       <div class="dz-icon">🧬</div>
       <div class="dz-hint">
-        Drop MSigDB GMT or TXT here<br>
+        Drop MSigDB GMT or TXT here
       </div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
@@ -192,6 +192,7 @@
 
   <div id="res-panel" style="display:none">
 
+    <!-- Toolbar -->
     <div class="res-toolbar">
       <div class="res-toolbar-left">
         <span class="res-count" id="res-count"></span>
@@ -208,13 +209,14 @@
       </div>
     </div>
 
-    <!-- FDR note (shown when FDR column is visible) -->
+    <!-- Issue (2): FDR note hidden by default -->
     <div class="fdr-note" id="fdr-note" style="display:none">
-      <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5) when
-      most pathways are null — this is expected and statistically correct.
+      <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5)
+      when most pathways are null — this is expected and statistically correct.
       FDR control is stringent with many pathways tested simultaneously.
     </div>
 
+    <!-- Results table -->
     <div class="tbl-wrap">
       <table class="rt" id="rt">
         <thead id="rt-head"></thead>
@@ -222,14 +224,26 @@
       </table>
     </div>
 
-    <!-- NES bar chart (shown when >10 pathways) -->
+    <!-- Issue (3): NES bar chart section -->
     <div class="nes-chart-section" id="nes-chart-section" style="display:none">
       <div class="plot-toolbar" style="margin-bottom:8px">
-        <span class="plot-lbl">NES Overview — Ranked by NES</span>
+        <div class="plot-title-group">
+          <span class="plot-lbl">NES Overview</span>
+        </div>
+        <div class="plot-controls">
+          <!-- toggle shown only when >20 pathways -->
+          <button class="btn-secondary btn-sm" id="btn-toggle-nes"
+                  style="display:none">▼ Show chart</button>
+          <button class="btn-secondary btn-sm" id="btn-dl-nes"
+                  title="Download NES chart as PNG">⬇ PNG</button>
+        </div>
       </div>
-      <div id="nes-chart-wrap"></div>
+      <div id="nes-chart-body">
+        <div id="nes-chart-wrap"></div>
+      </div>
     </div>
 
+    <!-- Enrichment score curve -->
     <div class="plot-section" id="plot-section" style="display:none">
       <div class="plot-toolbar">
         <div class="plot-title-group">
@@ -247,18 +261,20 @@
                   title="Reset zoom to full view">⊡ Reset zoom</button>
           <button class="btn-secondary btn-sm" id="btn-dl-one-curve"
                   title="Download this enrichment curve as PNG">⬇ PNG</button>
-          <span class="plot-hint">scroll/drag to zoom &amp; pan · dbl-click reset</span>
+          <!-- Issue (4): removed scroll/drag/dbl-click hint text -->
         </div>
       </div>
       <div class="svg-wrap" id="svg-wrap"></div>
       <div class="es-stats" id="es-stats"></div>
     </div>
 
-  </div>
+  </div><!-- /res-panel -->
 
   <!-- References -->
   <div id="ref-section" class="ref-section">
-    <div class="sec-lbl" style="padding:0 0 8px 0">References &amp; Resources</div>
+    <div class="sec-lbl" style="padding:0 0 8px 0">
+      References &amp; Resources
+    </div>
     <ol class="ref-list">
       <li>
         <em>[Our paper — citation to be added upon publication]</em>
@@ -300,7 +316,7 @@
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
          target="_blank" rel="noopener">MSigDB Collections</a>
       (CC BY 4.0 for academic use; commercial use requires a separate
-      agreement with the Broad Institute).
+      agreement with the Broad Institute of MIT and Harvard).
     </p>
   </div>
 
