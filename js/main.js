@@ -232,10 +232,7 @@ function _renderResults(results) {
   document.getElementById('res-panel').style.display   = 'block';
   document.getElementById('res-count').textContent =
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
-  document.getElementById('res-engine-badge').textContent =
-    S.engine === 'parametric'
-      ? 'Parametric (Γ + GΓ via jStat)'
-      : 'Permutation';
+
 
   // Show FDR explanatory note when FDR column is active
   document.getElementById('fdr-note').style.display =
