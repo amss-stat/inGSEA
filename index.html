@@ -30,15 +30,12 @@
     <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.4</div>
   </div>
   <nav class="hdr-nav">
-    <span class="jstat-badge" id="jstat-status">jStat…</span>
     <span class="browser-note" title="Chrome provides significantly faster JS engine performance for iGSEA">
       🌐 Chrome recommended
     </span>
-    <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
-       target="_blank" rel="noopener" class="nav-link">MSigDB</a>
-    <a href="https://github.com/your-repo/igsea"
-       target="_blank" rel="noopener" class="nav-link">GitHub</a>
     <span class="hdr-badge">Client-side Only</span>
+    <a href="https://github.com/amss-stat/iGSEA-DEMO"
+       target="_blank" rel="noopener" class="nav-link">GitHub</a>
   </nav>
 </header>
 
@@ -66,7 +63,6 @@
       <div class="dz-icon">🧬</div>
       <div class="dz-hint">
         Drop MSigDB GMT or TXT here<br>
-        <span class="hint-sub">name⟨tab⟩url⟨tab⟩gene1⟨tab⟩gene2…</span>
       </div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
@@ -100,9 +96,6 @@
     <div class="fg">
       <label class="fl" for="weight-p">
         Weight exponent <em>p</em>
-        <span class="fl-note" title="p=0: classical unweighted KS; p=1: standard GSEA (default); p=2: quadratic">
-          0 = KS · 1 = GSEA default · 2 = quadratic
-        </span>
       </label>
       <input type="number" class="fi" id="weight-p"
              value="1" min="0" max="3" step="0.5">
@@ -131,12 +124,9 @@
     <div class="fg">
       <label class="fl" for="sel-engine">Statistical engine</label>
       <select class="fi" id="sel-engine">
-        <option value="parametric">Parametric Approximation (Γ + GΓ)</option>
+        <option value="parametric">Parametric Approximation</option>
         <option value="permutation">Permutation only</option>
       </select>
-      <div class="hint-sub" style="margin-top:3px">
-        Parametric: Gamma (KS) + Generalised Gamma (AD) via jStat MLE
-      </div>
     </div>
 
     <div class="btn-row">
