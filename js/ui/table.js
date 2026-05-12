@@ -1,29 +1,32 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  Results table  ·  v2.5
+//  ui/table.js  ·  v2.6
 //  Changes:
-//  • Pathway name is now a clickable span (triggers plot),
-//    not a direct database link.
-//  • Added separate ↗MSigDB button with tooltip.
-//  • Removed Γ / GΓ notation → plain text labels.
+//  (1) Pathway name truncated with ellipsis + title tooltip
+//  (2) FDR column now in extended columns (hidden by default)
+//  (5) NES-AD coloured neutral (never negative in practice)
+//  (6) Column headers updated: pKS_par / pAD_par separate from emp
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import { msigdbUrl } from './fileio.js';
 
+// Issue (2): fdrOnly removed — FDR is now an extra column
 const COLS = [
-  { id:'rank',    hdr:'#',                       extra:false, sort:false },
-  { id:'name',    hdr:'Pathway',                 extra:false, sort:true  },
-  { id:'size',    hdr:'Size',                    extra:false, sort:true  },
-  { id:'nes',     hdr:'NES',                     extra:false, sort:true  },
-  { id:'nes_ad',  hdr:'NES-AD',                  extra:false, sort:true  },
-  { id:'pKS',     hdr:'p<sub>KS</sub>',          extra:false, sort:true  },
-  { id:'pAD',     hdr:'p<sub>AD</sub>',          extra:false, sort:true  },
-  { id:'pCauchy', hdr:'p<sub>Cauchy</sub>',      extra:false, sort:true  },
-  { id:'fdr',     hdr:'FDR',                     extra:false, sort:true, fdrOnly:true },
-  { id:'es',      hdr:'ES',                      extra:true,  sort:true  },
-  { id:'ad',      hdr:'AD',                      extra:true,  sort:true  },
-  { id:'pKS_emp', hdr:'p<sub>KS</sub>&nbsp;(perm)', extra:true, sort:true },
-  { id:'pAD_emp', hdr:'p<sub>AD</sub>&nbsp;(perm)', extra:true, sort:true },
+  { id:'rank',    hdr:'#',                           extra:false, sort:false },
+  { id:'name',    hdr:'Pathway',                     extra:false, sort:true  },
+  { id:'size',    hdr:'Size',                        extra:false, sort:true  },
+  { id:'nes',     hdr:'NES',                         extra:false, sort:true  },
+  { id:'nes_ad',  hdr:'NES-AD',                      extra:false, sort:true  },
+  { id:'pKS',     hdr:'p<sub>KS</sub>',              extra:false, sort:true  },
+  { id:'pAD',     hdr:'p<sub>AD</sub>',              extra:false, sort:true  },
+  { id:'pCauchy', hdr:'p<sub>Cauchy</sub>',          extra:false, sort:true  },
+  // Issue (2): FDR moved to extended columns
+  { id:'fdr',     hdr:'FDR',                         extra:true,  sort:true  },
+  { id:'es',      hdr:'ES',                          extra:true,  sort:true  },
+  { id:'ad',      hdr:'AD',                          extra:true,  sort:true  },
+  // Issue (6): separate empirical columns
+  { id:'pKS_emp', hdr:'p<sub>KS</sub>&nbsp;(perm)',  extra:true,  sort:true  },
+  { id:'pAD_emp', hdr:'p<sub>AD</sub>&nbsp;(perm)',  extra:true,  sort:true  },
 ];
 
 let _sortCol = 'pCauchy';
@@ -38,8 +41,7 @@ export function renderTable(results, showFDR, engine, onSelect) {
 // ── Head ──────────────────────────────────────────────────────
 function _buildHead(showFDR, engine) {
   const isPar = engine === 'parametric';
-  // Issue (10): plain text instead of Γ / GΓ
-  const over = {
+  const over  = {
     pKS: isPar
       ? 'p<sub>KS</sub>&thinsp;<small>(par)</small>'
       : 'p<sub>KS</sub>',
@@ -48,7 +50,8 @@ function _buildHead(showFDR, engine) {
       : 'p<sub>AD</sub>',
   };
 
-  const vis = COLS.filter(c => !(c.fdrOnly && !showFDR));
+  // Issue (2): all cols shown/hidden purely by extra flag now
+  const vis = COLS;
   const ths = vis.map(c => {
     const lbl = over[c.id] ?? c.hdr;
     const xc  = c.extra  ? 'col-ext' : '';
@@ -71,19 +74,15 @@ function _buildBody(results, showFDR, onSelect) {
     const tr = document.createElement('tr');
     tr.dataset.name = r.name;
 
-    const url  = msigdbUrl(r.name, r.url);
-    const C    = _cells(r, rank, url, showFDR);
-    const vis  = COLS.filter(c => !(c.fdrOnly && !showFDR));
-    tr.innerHTML = vis.map(c => C[c.id] ?? '').join('');
+    const url = msigdbUrl(r.name, r.url);
+    const C   = _cells(r, rank, url);
+    tr.innerHTML = COLS.map(c => C[c.id] ?? '').join('');
 
-    // Issue (1): clicking pathway name triggers plot, not database jump
     tr.querySelector('.path-name-btn')?.addEventListener('click', e => {
       e.stopPropagation();
       _selectRow(tr);
       onSelect(r);
     });
-
-    // plot icon button
     tr.querySelector('.btn-plot')?.addEventListener('click', e => {
       e.stopPropagation();
       _selectRow(tr);
@@ -102,7 +101,7 @@ function _buildBody(results, showFDR, onSelect) {
 }
 
 // ── Cells ─────────────────────────────────────────────────────
-function _cells(r, rank, url, showFDR) {
+function _cells(r, rank, url) {
   const pc = p =>
     p == null ? '' :
     p < 0.001 ? 's001' :
@@ -113,39 +112,28 @@ function _cells(r, rank, url, showFDR) {
     p == null ? '—' :
     Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
 
-  // Issue (1): name cell — span triggers plot; separate ↗MSigDB link
+  // Issue (1): truncated name with title tooltip; buttons outside truncated span
   const nameCell = `
     <td class="cpname">
-      <span class="path-name-btn" title="View enrichment curve"
-            style="cursor:pointer;color:var(--blue);font-weight:500">
-        ${_esc(r.name)}
-      </span>
+      <span class="path-name-btn"
+            title="${_esc(r.name)}">${_esc(r.name)}</span>
       <button class="btn-plot" title="View enrichment curve">📈</button>
       <a class="btn-msigdb" href="${url}" target="_blank" rel="noopener"
-         title="Jump to pathway database information"
-         style="font-size:10px;color:var(--blue);text-decoration:none;
-                padding:1px 4px;border:1px solid var(--border);
-                border-radius:3px;margin-left:3px;white-space:nowrap;
-                vertical-align:middle;display:inline-block;
-                transition:background .12s"
-         onmouseover="this.style.background='var(--blue-lt)'"
-         onmouseout="this.style.background=''">
-        ↗MSigDB
-      </a>
+         title="Jump to pathway database information">↗MSigDB</a>
     </td>`;
 
   return {
     rank:    `<td class="cn">${rank + 1}</td>`,
     name:    nameCell,
     size:    `<td class="num neu">${r.size}</td>`,
-    nes:     `<td class="num ${r.nes    >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`,
-    nes_ad:  `<td class="num ${r.nes_ad >= 0 ? 'pos' : 'neg'}">${r.nes_ad.toFixed(3)}</td>`,
+    nes:     `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`,
+    // Issue (5): NES-AD always neutral colour
+    nes_ad:  `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`,
     pKS:     `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`,
     pAD:     `<td class="pv ${pc(r.pAD)}">${fp(r.pAD)}</td>`,
     pCauchy: `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`,
-    fdr:     showFDR
-               ? `<td class="fv ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">${fp(r.fdr)}</td>`
-               : '',
+    // Issue (2): FDR is col-ext (hidden until extended columns checked)
+    fdr:     `<td class="fv col-ext ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">${fp(r.fdr)}</td>`,
     es:      `<td class="num col-ext ${r.es >= 0 ? 'pos' : 'neg'}">${r.es.toFixed(4)}</td>`,
     ad:      `<td class="num col-ext neu">${r.ad.toFixed(2)}</td>`,
     pKS_emp: `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`,
