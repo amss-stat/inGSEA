@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/controls.js  ·  UI state helpers & demo-data generator
+//  ui/controls.js  ·  UI helpers, demo generator
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import { buildMasks } from './fileio.js';
 
-// ── Logging ─────────────────────────────────────────────────
+// ── Log ──────────────────────────────────────────────────────
 export function log(msg, cls = '') {
   const el = document.getElementById('log');
   const p  = document.createElement('p');
@@ -17,103 +17,122 @@ export function log(msg, cls = '') {
 }
 
 // ── Progress ─────────────────────────────────────────────────
-export function setProgress(pct, msg) {
-  document.getElementById('prog-fill').style.width = pct + '%';
+export function setProgress(pct, phase, msg) {
+  document.getElementById('prog-fill').style.width = Math.min(pct, 100) + '%';
   document.getElementById('prog-pct').textContent  = pct + '%';
-  if (msg) document.getElementById('prog-status').textContent = msg;
+  if (phase) document.getElementById('prog-phase').textContent = phase;
+  if (msg)   document.getElementById('prog-msg').textContent   = msg;
 }
 
-export function showProgress(visible) {
-  document.getElementById('prog-wrap').style.display = visible ? 'block' : 'none';
+export function showProgress(v) {
+  document.getElementById('prog-wrap').style.display = v ? 'block' : 'none';
 }
 
-// ── File status ──────────────────────────────────────────────
-export function setFileLoaded(type, filename, stats) {
-  document.getElementById(`fn-${type}`).textContent  = filename;
-  document.getElementById(`st-${type}`).textContent  = stats;
+// ── File loaded feedback ──────────────────────────────────────
+export function setFileLoaded(type, name, stats) {
+  document.getElementById(`fn-${type}`).textContent = name;
+  document.getElementById(`st-${type}`).textContent = stats;
   document.getElementById(`dz-${type}`).classList.add('ok');
 }
 
-// ── Pathway selector ─────────────────────────────────────────
-export function populatePathwaySelectors(pathwayList) {
-  const singleSel = document.getElementById('sel-path-single');
-  const multiSel  = document.getElementById('sel-path-multi');
-
-  singleSel.innerHTML = '<option value="">— choose pathway —</option>';
-  multiSel.innerHTML  = '';
-
+// ── Pathway selectors ─────────────────────────────────────────
+export function populateSelectors(pathwayList) {
+  const single = document.getElementById('sel-single');
+  const multi  = document.getElementById('sel-multi');
+  single.innerHTML = '<option value="">— choose pathway —</option>';
+  multi.innerHTML  = '';
   for (const p of pathwayList) {
     const label = `${p.name}  (${p.size})`;
-    const o1 = new Option(label, p.name);
-    const o2 = new Option(label, p.name);
-    singleSel.appendChild(o1);
-    multiSel.appendChild(o2);
+    single.appendChild(new Option(label, p.name));
+    multi.appendChild(new Option(label, p.name));
   }
 }
 
-/** Return selected pathways based on current mode tab. */
-export function getSelectedPathways(pathwayList) {
-  const activeTab = document.querySelector('.pm-tab.active');
-  const mode = activeTab?.dataset.mode || 'all';
-
-  if (mode === 'all') return pathwayList;
-
-  if (mode === 'single') {
-    const val = document.getElementById('sel-path-single').value;
-    return val ? pathwayList.filter(p => p.name === val) : pathwayList;
-  }
-
-  if (mode === 'multi') {
-    const sel = document.getElementById('sel-path-multi');
-    const vals = new Set(Array.from(sel.selectedOptions).map(o => o.value));
-    return vals.size > 0 ? pathwayList.filter(p => vals.has(p.name)) : pathwayList;
-  }
-
-  return pathwayList;
-}
-
-// ── Run button ───────────────────────────────────────────────
-export function updateRunButton(enabled) {
-  document.getElementById('btn-run').disabled = !enabled;
-}
-
-// ── Pathway mode tabs ────────────────────────────────────────
-export function setupPathwayModeTabs() {
+// ── Pathway mode tabs ─────────────────────────────────────────
+export function setupModeTabs() {
   document.querySelectorAll('.pm-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.pm-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
-      const mode = tab.dataset.mode;
-      document.getElementById('sel-single-wrap').style.display = mode === 'single' ? 'block' : 'none';
-      document.getElementById('sel-multi-wrap').style.display  = mode === 'multi'  ? 'block' : 'none';
+      const m = tab.dataset.mode;
+      document.getElementById('sel-single-wrap').style.display = m === 'single' ? 'block' : 'none';
+      document.getElementById('sel-multi-wrap').style.display  = m === 'multi'  ? 'block' : 'none';
     });
   });
 }
 
-// ── Download CSV ─────────────────────────────────────────────
-export function downloadCSV(results, engine) {
-  if (!results?.length) return;
-  const rows = [['Pathway','Size','NES_KS','NES_AD','ES','AD',
-    engine === 'gg' ? 'pKS_gamma' : 'pKS_emp',
-    engine === 'gg' ? 'pAD_GG'    : 'pAD_emp',
-    'pCauchy','FDR','pKS_emp','pAD_emp']];
-  for (const r of results) {
-    rows.push([
-      r.name, r.size,
-      r.nes.toFixed(4), r.nes_ad.toFixed(4),
-      r.es.toFixed(4),  r.ad.toFixed(4),
-      r.pKS_fit, r.pAD_fit, r.pCauchy,
-      r.fdr ?? '', r.pKS_emp, r.pAD_emp
-    ]);
+// ── Get selected pathways ────────────────────────────────────
+export function getSelectedPathways(pathwayList) {
+  const mode = document.querySelector('.pm-tab.active')?.dataset.mode ?? 'all';
+  if (mode === 'all') return pathwayList;
+  if (mode === 'single') {
+    const v = document.getElementById('sel-single').value;
+    return v ? pathwayList.filter(p => p.name === v) : pathwayList;
   }
-  const csv = rows.map(r => r.join(',')).join('\n');
-  const a   = document.createElement('a');
-  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-  a.download = 'igsea_results.csv';
-  a.click();
+  if (mode === 'multi') {
+    const sel  = document.getElementById('sel-multi');
+    const vals = new Set(Array.from(sel.selectedOptions, o => o.value));
+    return vals.size > 0 ? pathwayList.filter(p => vals.has(p.name)) : pathwayList;
+  }
+  return pathwayList;
 }
 
-// ── Demo data generator ──────────────────────────────────────
+// ── Run button ────────────────────────────────────────────────
+export function setRunEnabled(v) {
+  document.getElementById('btn-run').disabled = !v;
+}
+
+// ── WebR status indicator ─────────────────────────────────────
+export function setWebRStatus(state, msg) {
+  const dot   = document.getElementById('webr-dot');
+  const label = document.getElementById('webr-label');
+  dot.className = 'webr-dot ' + state;   // 'loading' | 'ready' | 'error'
+  const labels = {
+    loading:     'Loading R…',
+    installing:  'Installing flexsurv…',
+    ready:       'R ready',
+    error:       'R unavailable'
+  };
+  label.textContent = labels[state] ?? msg ?? state;
+  if (state === 'error' && msg) label.title = msg;
+}
+
+// ── CSV export ────────────────────────────────────────────────
+export function downloadCSV(results, engine) {
+  if (!results?.length) return;
+  const isGG = engine === 'gg';
+  const hdr = [
+    'Pathway','Size','NES_KS','NES_AD','ES','AD',
+    isGG ? 'pKS_gamma' : 'pKS_emp',
+    isGG ? 'pAD_GG'    : 'pAD_emp',
+    'pCauchy','FDR','pKS_emp','pAD_emp'
+  ];
+  const rows = [hdr.join(',')];
+  for (const r of results) {
+    rows.push([
+      `"${r.name}"`, r.size,
+      r.nes.toFixed(6), r.nes_ad.toFixed(6),
+      r.es.toFixed(6),  r.ad.toFixed(4),
+      r.pKS.toExponential(6), r.pAD.toExponential(6),
+      r.pCauchy.toExponential(6),
+      r.fdr != null ? r.fdr.toExponential(6) : '',
+      r.pKS_emp.toExponential(6), r.pAD_emp.toExponential(6)
+    ].join(','));
+  }
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a    = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob),
+    download: 'igsea_results.csv'
+  });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ── Demo data ─────────────────────────────────────────────────
+/**
+ * Generate synthetic demo dataset.
+ * Uses Box-Muller for proper Gaussian sampling.
+ */
 export function generateDemo() {
   const NG = 200, NS = 20, NC = 10;
 
@@ -124,19 +143,25 @@ export function generateDemo() {
     ...Array.from({ length: NS - NC }, (_, i) => `Ctrl_${i + 1}`)
   ];
 
-  const up  = new Set(Array.from({ length: 20 }, (_, i) => i));
-  const dn  = new Set(Array.from({ length: 15 }, (_, i) => i + 50));
+  // Membership sets
+  const upSet  = new Set(Array.from({ length: 20 }, (_, i) => i));
+  const dnSet  = new Set(Array.from({ length: 15 }, (_, i) => i + 50));
+  const mixSet = new Set([
+    ...Array.from({ length: 10 }, (_, i) => i + 100),
+    ...Array.from({ length: 10 }, (_, i) => i + 30)
+  ]);
 
   const mat = [];
   for (let g = 0; g < NG; g++) {
-    const row = new Float64Array(NS);
+    const row  = new Float64Array(NS);
     const base = 4 + Math.random() * 4;
     const sd   = 0.5 + Math.random() * 0.5;
     for (let s = 0; s < NS; s++) {
-      let v = base + sd * randn();
+      let v = base + sd * _randn();
       if (s < NC) {
-        if (up.has(g)) v += 1.8 + Math.random() * 0.8;
-        if (dn.has(g)) v -= 1.8 + Math.random() * 0.8;
+        if (upSet.has(g))  v += 1.8 + Math.random() * 0.8;
+        if (dnSet.has(g))  v -= 1.8 + Math.random() * 0.8;
+        // mix: half up, half not — produces moderate/null ES
       }
       row[s] = Math.max(0, v);
     }
@@ -144,20 +169,21 @@ export function generateDemo() {
   }
 
   const rawPathways = [
-    { name: 'DEMO_UPREGULATED',   url: null, genes: Array.from({ length: 20 }, (_, i) => gNames[i]) },
-    { name: 'DEMO_DOWNREGULATED', url: null, genes: Array.from({ length: 15 }, (_, i) => gNames[i + 50]) },
-    { name: 'DEMO_MIXED',         url: null, genes: [
-      ...Array.from({ length: 10 }, (_, i) => gNames[i + 100]),
-      ...Array.from({ length: 10 }, (_, i) => gNames[i + 30])
-    ]}
+    { name:'DEMO_UPREGULATED',   url:null, genes: Array.from({length:20}, (_,i)=>gNames[i]) },
+    { name:'DEMO_DOWNREGULATED', url:null, genes: Array.from({length:15}, (_,i)=>gNames[i+50]) },
+    { name:'DEMO_MIXED',         url:null, genes: [
+        ...Array.from({length:10}, (_,i) => gNames[i+100]),
+        ...Array.from({length:10}, (_,i) => gNames[i+30])
+      ]}
   ];
 
   const pathwayList = buildMasks(rawPathways, gNames);
-
   return { gNames, sNames, mat, rawPathways, pathwayList, nCase: NC };
 }
 
-function randn() {
-  const u = 1 - Math.random(), v = Math.random();
+function _randn() {
+  // Box-Muller transform
+  const u = 1 - Math.random();   // avoid log(0)
+  const v = Math.random();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
