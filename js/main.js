@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  iGSEA v2.4
+//  main.js  ·  iGSEA v2.5
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -8,7 +8,8 @@ import {
   parseExpr, parseGMT, buildMasks, setupDropZone
 }                           from './ui/fileio.js';
 import {
-  drawCurve, updatePlotHeader, renderESStats, resetZoom
+  drawCurve, updatePlotHeader, renderESStats, resetZoom,
+  drawNESChart, exportCurrentCurvePNG, exportAllCurves
 }                           from './ui/plot.js';
 import { renderTable }      from './ui/table.js';
 import {
@@ -49,17 +50,42 @@ function checkJStat() {
 }
 setTimeout(checkJStat, 100);
 
-// ── UI ───────────────────────────────────────────────────────
+// ── UI ────────────────────────────────────────────────────────
 setupModeTabs();
 
 document.getElementById('sel-engine').addEventListener('change', e => {
   S.engine = e.target.value;
 });
+
 document.getElementById('chk-extra').addEventListener('change', e => {
   document.getElementById('rt').classList.toggle('show-ext', e.target.checked);
 });
+
 document.getElementById('btn-reset-zoom')?.addEventListener('click', () => {
   resetZoom();
+});
+
+// Issue (3): single-curve PNG download
+document.getElementById('btn-dl-one-curve')?.addEventListener('click', () => {
+  if (!S.results) return;
+  const sel = document.querySelector('#tbody tr.sel');
+  const name = sel?.dataset.name ?? 'curve';
+  const safe = name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
+  exportCurrentCurvePNG(`igsea_${safe}.png`);
+});
+
+// Issue (9): batch export all curves
+document.getElementById('btn-dl-curves')?.addEventListener('click', async () => {
+  if (!S.results || !S.pathwayList.length) return;
+  const btn = document.getElementById('btn-dl-curves');
+  btn.disabled = true;
+  btn.textContent = '⏳ Exporting…';
+  try {
+    await exportAllCurves(S.results, S.pathwayList, S.geneNames);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🖼 Export curves';
+  }
 });
 
 // ── Clear ─────────────────────────────────────────────────────
@@ -67,11 +93,12 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   if (S.running) return;
   S.results = null;
   S.showFDR = false;
-  document.getElementById('res-panel').style.display    = 'none';
-  document.getElementById('empty-state').style.display  = 'flex';
-  document.getElementById('plot-section').style.display = 'none';
-  document.getElementById('prog-wrap').style.display    = 'none';
-  document.getElementById('fdr-note').style.display     = 'none';
+  document.getElementById('res-panel').style.display        = 'none';
+  document.getElementById('empty-state').style.display      = 'flex';
+  document.getElementById('plot-section').style.display     = 'none';
+  document.getElementById('nes-chart-section').style.display = 'none';
+  document.getElementById('prog-wrap').style.display        = 'none';
+  document.getElementById('fdr-note').style.display         = 'none';
   document.getElementById('tbody').innerHTML = '';
   log('Results cleared', 'ok');
 });
@@ -117,7 +144,9 @@ function _loadPath(file) {
       const txt   = e.target.result;
       const first = txt.split('\n')[0] || '';
       if ((first.match(/\t/g) ?? []).length < 2)
-        throw new Error('Not GMT format. Expected: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩…');
+        throw new Error(
+          'Not GMT format. Expected: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩…'
+        );
       const rp = parseGMT(txt);
       S.rawPathways = rp;
       log(`Gene sets: ${rp.length} loaded`, 'ok');
@@ -149,33 +178,36 @@ function _updateRun() {
 document.getElementById('btn-run').addEventListener('click', async () => {
   if (S.running) return;
 
-  const paths = getSelectedPathways(S.pathwayList);
+  const paths  = getSelectedPathways(S.pathwayList);
   if (!paths.length) { log('No pathways selected', 'err'); return; }
 
   const nCase  = +document.getElementById('n-case').value;
   const nPerms = Math.min(+document.getElementById('n-perms').value, 2000);
   const wt     = Math.max(0, +document.getElementById('weight-p').value);
-  S.engine   = document.getElementById('sel-engine').value;
-  S.running  = true;
+  S.engine    = document.getElementById('sel-engine').value;
+  S.running   = true;
   S.abortCtrl = new AbortController();
 
   _updateRun();
   showProgress(true);
   setProgress(0, 'Starting', 'Initialising iGSEA…');
-  log(`iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · p=${wt} · engine=${S.engine}`, 'ok');
+  log(
+    `iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · ` +
+    `p=${wt} · engine=${S.engine}`, 'ok'
+  );
 
   const t0 = performance.now();
   try {
     const results = await runGSEA({
-      exprMat:      S.exprMat,
-      geneNames:    S.geneNames,
-      pathways:     paths,
+      exprMat:     S.exprMat,
+      geneNames:   S.geneNames,
+      pathways:    paths,
       nCase,
       nPerms,
-      weightP:      wt,
-      engine:       S.engine,
-      abortSignal:  S.abortCtrl.signal,
-      onProgress:   setProgress
+      weightP:     wt,
+      engine:      S.engine,
+      abortSignal: S.abortCtrl.signal,
+      onProgress:  setProgress
     });
 
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
@@ -196,7 +228,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
     }
   }
 
-  S.running  = false;
+  S.running   = false;
   S.abortCtrl = null;
   _updateRun();
 });
@@ -219,7 +251,10 @@ document.getElementById('btn-demo').addEventListener('click', () => {
     `${d.pathwayList.length} synthetic gene sets`);
   populateSelectors(d.pathwayList);
   _updateRun();
-  log(`Demo: ${d.gNames.length}×${d.sNames.length}, ${d.pathwayList.length} pathways`, 'ok');
+  log(
+    `Demo: ${d.gNames.length}×${d.sNames.length}, ` +
+    `${d.pathwayList.length} pathways`, 'ok'
+  );
 });
 
 document.getElementById('btn-dl').addEventListener('click', () => {
@@ -230,21 +265,33 @@ document.getElementById('btn-dl').addEventListener('click', () => {
 function _renderResults(results) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('res-panel').style.display   = 'block';
+
+  // Issue (5): only pathway count, no engine badge
   document.getElementById('res-count').textContent =
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
 
-
-  // Show FDR explanatory note when FDR column is active
+  // FDR note
   document.getElementById('fdr-note').style.display =
     S.showFDR ? 'block' : 'none';
+
+  // Issue (8): NES bar chart when > 10 pathways
+  const nesSection = document.getElementById('nes-chart-section');
+  if (results.length > 10) {
+    nesSection.style.display = 'block';
+    drawNESChart(results, document.getElementById('nes-chart-wrap'));
+  } else {
+    nesSection.style.display = 'none';
+  }
 
   renderTable(results, S.showFDR, S.engine, _selectPathway);
 }
 
 function _selectPathway(result) {
   updatePlotHeader(result);
-  drawCurve(result, S.pathwayList, S.geneNames,
-    document.getElementById('svg-wrap'));
+  drawCurve(
+    result, S.pathwayList, S.geneNames,
+    document.getElementById('svg-wrap')
+  );
   renderESStats(result, S.engine, S.showFDR);
 }
 
@@ -253,13 +300,21 @@ let _rt;
 window.addEventListener('resize', () => {
   clearTimeout(_rt);
   _rt = setTimeout(() => {
+    // Redraw NES chart if visible
+    if (S.results && S.results.length > 10) {
+      const wrap = document.getElementById('nes-chart-wrap');
+      if (wrap) drawNESChart(S.results, wrap);
+    }
+    // Redraw selected curve
     if (!S.results) return;
     const sel = document.querySelector('#tbody tr.sel');
     if (!sel) return;
     const r = S.results.find(x => x.name === sel.dataset.name);
-    if (r) drawCurve(r, S.pathwayList, S.geneNames,
-      document.getElementById('svg-wrap'));
+    if (r) drawCurve(
+      r, S.pathwayList, S.geneNames,
+      document.getElementById('svg-wrap')
+    );
   }, 200);
 }, { passive: true });
 
-log('iGSEA v2.4 ready — load files or click ⚡ Demo', 'ok');
+log('iGSEA v2.5 ready — load files or click ⚡ Demo', 'ok');
