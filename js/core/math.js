@@ -1,18 +1,20 @@
 // ═══════════════════════════════════════════════════════════
-//  core/math.js  ·  Pure numeric primitives
-//  Performance: calcSNR accepts pre-allocated output buffer
+//  core/math.js  ·  v2.4
+//  Changes:
+//  • calcSNR: accepts optional Float32Array output (faster sort)
+//  • calcGSEAStats: accepts weight exponent p (default 1)
+//  • bhFDR: clamp q to [0,1]; correct sweep
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 /**
  * Welch SNR: (μ_case − μ_ctrl) / (σ_case + σ_ctrl + ε)
  *
- * @param {Float64Array[]} mat
- * @param {number}         nG
- * @param {ArrayLike}      cIdx  case indices (Uint16Array view OK)
- * @param {ArrayLike}      tIdx  ctrl indices
- * @param {Float64Array}   [out] pre-allocated output buffer (length nG)
- * @returns {Float64Array}  out (or new array if not provided)
+ * Performance notes:
+ * - out can be Float64Array or Float32Array.
+ *   Float32 halves memory bandwidth for the sort step.
+ *   Precision is sufficient for ranking (we only need the order).
+ * - cIdx / tIdx may be Uint16Array views (subarray) — works correctly.
  */
 export function calcSNR(mat, nG, cIdx, tIdx, out) {
   const snr = out ?? new Float64Array(nG);
@@ -34,26 +36,55 @@ export function calcSNR(mat, nG, cIdx, tIdx, out) {
 }
 
 /**
- * Descending argsort into pre-allocated Int32Array.
- * @param {Float64Array} snr
- * @param {number}       nG
- * @param {Int32Array}   ord  pre-allocated, length nG
+ * Descending argsort of snr into pre-allocated Array ord.
+ * Uses plain Array (not TypedArray) for ord so V8 uses its
+ * optimised TimSort path rather than the TypedArray fallback.
+ *
+ * @param {Float64Array|Float32Array} snr
+ * @param {number}  nG
+ * @param {number[]} ord  plain Array, length nG, pre-allocated
  */
 export function rankOrder(snr, nG, ord) {
   for (let i = 0; i < nG; i++) ord[i] = i;
+  // V8 TimSort on plain Array with numeric comparator is faster
+  // than Int32Array.sort with a closure in most engines.
   ord.sort((a, b) => snr[b] - snr[a]);
 }
 
 /**
- * GSEA enrichment walk.
- * Returns { ks, ad, curve (or null), peakIdx }.
+ * GSEA enrichment walk — standard weighted KS statistic.
+ *
+ * Weight exponent p (default 1):
+ *   p = 0 : unweighted (classical KS, equal weight to all hits)
+ *   p = 1 : weighted by |SNR|  (original GSEA default)
+ *   p = 2 : quadratic weighting
+ *
+ * For each position i in the ranked list:
+ *   hit  gene: Δ = |snr_i|^p / N_R   where N_R = Σ_{j∈S} |snr_j|^p
+ *   miss gene: Δ = -1 / (N - N_H)    where N_H = |S|, N = total genes
+ *
+ * ES = running sum value at its maximum absolute deviation.
+ * AD = Σ_{i=0}^{N-2}  ES_i² / (F_i · (1-F_i))
+ *   where F_i = (i+1)/N  (fraction of genes processed through step i+1)
+ *
+ * @param {Float64Array|Float32Array} snr    ranked-gene SNR values
+ * @param {number[]|Int32Array}       ord    indices sorted by descending SNR
+ * @param {Uint8Array}                mask   1 = gene in set
+ * @param {number}                    nG
+ * @param {boolean}                   wantCurve
+ * @param {number}                    [p=1]  weight exponent
+ * @returns {{ ks, ad, curve, peakIdx }}
  */
-export function calcGSEAStats(snr, ord, mask, nG, wantCurve) {
+export function calcGSEAStats(snr, ord, mask, nG, wantCurve, p = 1) {
+  // Pre-compute hit count and weighted sum N_R
   let nHits = 0, hitSum = 0;
   for (let i = 0; i < nG; i++) {
     if (mask[ord[i]]) {
       nHits++;
-      hitSum += snr[ord[i]] < 0 ? -snr[ord[i]] : snr[ord[i]];
+      const absV = snr[ord[i]] < 0 ? -snr[ord[i]] : snr[ord[i]];
+      hitSum += p === 1 ? absV
+              : p === 0 ? 1
+              : Math.pow(absV, p);
     }
   }
 
@@ -70,16 +101,19 @@ export function calcGSEAStats(snr, ord, mask, nG, wantCurve) {
   let cum = 0.0, ks = 0.0, maxAbs = 0.0, peakIdx = 0, ad = 0.0;
 
   for (let i = 0; i < nG; i++) {
-    const absSnr = snr[ord[i]];
-    cum += mask[ord[i]]
-      ? (absSnr < 0 ? -absSnr : absSnr) * invHit
-      : missStep;
+    if (mask[ord[i]]) {
+      const absV = snr[ord[i]] < 0 ? -snr[ord[i]] : snr[ord[i]];
+      cum += (p === 1 ? absV : p === 0 ? 1 : Math.pow(absV, p)) * invHit;
+    } else {
+      cum += missStep;
+    }
 
     if (wantCurve) curve[i] = cum;
 
     const a = cum < 0 ? -cum : cum;
     if (a > maxAbs) { maxAbs = a; ks = cum; peakIdx = i; }
 
+    // AD: interior positions only (i = 0 … nG-2)
     if (i < nG - 1) {
       const F = (i + 1) / nG;
       ad += (cum * cum) / (F * (1.0 - F));
@@ -89,7 +123,10 @@ export function calcGSEAStats(snr, ord, mask, nG, wantCurve) {
   return { ks, ad, curve, peakIdx };
 }
 
-/** Cauchy combination of p-values. */
+/**
+ * Cauchy combination of p-values (equal weights).
+ * Liu & Xie 2020.
+ */
 export function cauchyCombine(...pvals) {
   let s = 0;
   for (let p of pvals) {
@@ -100,23 +137,37 @@ export function cauchyCombine(...pvals) {
   return 0.5 - Math.atan(s) / Math.PI;
 }
 
-/** Benjamini-Hochberg FDR. */
+/**
+ * Benjamini–Hochberg FDR (step-up procedure).
+ * Returns Float64Array of q-values aligned to input order.
+ * All q-values are clamped to [0, 1].
+ *
+ * Algorithm:
+ *   Sort p ascending → p(1) ≤ p(2) ≤ … ≤ p(m)
+ *   BH q(i) = min_{j≥i} { p(j) · m / j }   (cumulative min from right)
+ */
 export function bhFDR(pvals) {
   const n   = pvals.length;
+  if (n === 0) return new Float64Array(0);
+  if (n === 1) return Float64Array.from([Math.min(pvals[0], 1)]);
+
   const idx = Array.from({ length: n }, (_, i) => i);
   idx.sort((a, b) => pvals[a] - pvals[b]);
+
   const q = new Float64Array(n);
-  let min = 1.0;
+  let minQ = 1.0;
+
   for (let r = n - 1; r >= 0; r--) {
     const i  = idx[r];
-    const qi = pvals[i] * n / (r + 1);
-    min   = qi < min ? qi : min;
-    q[i]  = min;
+    // rank is r+1 (1-based); BH formula: p(r+1) * m / (r+1)
+    const qi = Math.min(pvals[i] * n / (r + 1), 1.0);
+    if (qi < minQ) minQ = qi;
+    q[i] = minQ;
   }
   return q;
 }
 
-/** Fisher-Yates shuffle (works for TypedArray). */
+/** Fisher-Yates shuffle (TypedArray-compatible). */
 export function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = (Math.random() * (i + 1)) | 0;
@@ -124,13 +175,13 @@ export function shuffle(arr) {
   }
 }
 
-/** NES for KS statistic. */
+/** NES for KS: ES / mean(|same-sign null ES|). */
 export function calcNES(es, nullKS) {
   const n   = nullKS.length;
   const pos = es >= 0;
   let sumSame = 0, nSame = 0, sumAll = 0;
   for (let j = 0; j < n; j++) {
-    const v = nullKS[j];
+    const v  = nullKS[j];
     const av = v < 0 ? -v : v;
     sumAll += av;
     if (pos ? v >= 0 : v < 0) { sumSame += av; nSame++; }
@@ -139,7 +190,7 @@ export function calcNES(es, nullKS) {
   return mean < 1e-12 ? 0 : es / mean;
 }
 
-/** NES for AD statistic. */
+/** NES for AD: AD / mean(null AD). */
 export function calcNES_AD(ad, nullAD) {
   const n = nullAD.length;
   let sum = 0;
@@ -148,7 +199,7 @@ export function calcNES_AD(ad, nullAD) {
   return mean < 1e-12 ? 0 : ad / mean;
 }
 
-/** Empirical p for KS (two-sided). */
+/** Two-sided empirical p for KS. Laplace-smoothed. */
 export function empP_KS(obsKS, nullKS, nPerms) {
   const ab = obsKS < 0 ? -obsKS : obsKS;
   let c = 0;
@@ -159,7 +210,7 @@ export function empP_KS(obsKS, nullKS, nPerms) {
   return (c + 1) / (nPerms + 1);
 }
 
-/** Empirical p for AD (one-sided). */
+/** One-sided empirical p for AD (larger = more extreme). */
 export function empP_AD(obsAD, nullAD, nPerms) {
   let c = 0;
   for (let j = 0; j < nPerms; j++) { if (nullAD[j] >= obsAD) c++; }
