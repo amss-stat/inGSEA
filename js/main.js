@@ -34,11 +34,11 @@ const S = {
 function checkJStat() {
   const badge = document.getElementById('jstat-status');
   if (typeof jStat !== 'undefined') {
-    log('jStat ready — parametric engine (Γ + GΓ) available', 'ok');
+    log('jStat ready', 'ok');
     badge.textContent = 'jStat ✓';
     badge.className   = 'jstat-badge ok';
   } else {
-    log('jStat unavailable — parametric engine disabled', 'warn');
+    log('jStat unavailable', 'warn');
     badge.textContent = 'jStat ✗';
     badge.className   = 'jstat-badge err';
     const opt = document.querySelector('#sel-engine option[value="parametric"]');
