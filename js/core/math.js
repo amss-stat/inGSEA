@@ -216,3 +216,63 @@ export function empP_AD(obsAD, nullAD, nPerms) {
   for (let j = 0; j < nPerms; j++) { if (nullAD[j] >= obsAD) c++; }
   return (c + 1) / (nPerms + 1);
 }
+
+// 在 core/math.js 中添加或修改
+
+/**
+ * 核心：计算 GSEA 风格的 FDR (基于全局 NES 分布)
+ * @param {number[]} obsNES - 观测到的 NES 数组 (nP)
+ * @param {Float64Array[]} nullNESMat - 所有置换的 NES 矩阵 [nP][nPerms]
+ * @param {boolean} twoSided - 对于 KS 需要分正负，对于 AD 只需要单边
+ */
+export function calcGseaFDR(obsNES, nullNESMat, twoSided = true) {
+  const nP = obsNES.length;
+  const nPerms = nullNESMat[0].length;
+  const fdr = new Float64Array(nP);
+
+  if (twoSided) {
+    // 1. 准备全局池 (KS 逻辑：正负分开处理)
+    const nullPos = [], nullNeg = [];
+    for (let i = 0; i < nP; i++) {
+      for (let j = 0; j < nPerms; j++) {
+        const v = nullNESMat[i][j];
+        if (v >= 0) nullPos.push(v); else nullNeg.push(v);
+      }
+    }
+    // 排序以便快速计数 (可选优化)
+    nullPos.sort((a, b) => a - b);
+    nullNeg.sort((a, b) => a - b);
+
+    for (let i = 0; i < nP; i++) {
+      const o = obsNES[i];
+      const isPos = o >= 0;
+      const pool = isPos ? nullPos : nullNeg;
+      const obsList = obsNES.filter(v => isPos ? v >= 0 : v < 0);
+
+      const countNull = pool.filter(v => isPos ? v >= o : v <= o).length;
+      const countObs  = obsList.filter(v => isPos ? v >= o : v <= o).length;
+
+      const phiNull = countNull / pool.length;
+      const phiObs  = countObs / obsList.length;
+      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
+    }
+  } else {
+    // 2. AD 逻辑：全是正数，单边处理
+    const nullPool = [];
+    for (let i = 0; i < nP; i++) {
+      for (let j = 0; j < nPerms; j++) nullPool.push(nullNESMat[i][j]);
+    }
+    nullPool.sort((a, b) => a - b);
+
+    for (let i = 0; i < nP; i++) {
+      const o = obsNES[i];
+      const countNull = nullPool.filter(v => v >= o).length;
+      const countObs  = obsNES.filter(v => v >= o).length;
+      
+      const phiNull = countNull / nullPool.length;
+      const phiObs  = countObs / nP;
+      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
+    }
+  }
+  return fdr;
+}
