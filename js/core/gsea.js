@@ -1,36 +1,39 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.9
-//
-//  Pipeline:
-//    1. Observed SNR + enrichment stats
-//    2. Permutations → nullKS[nP][nPerms], nullAD[nP][nPerms]
-//    3. Empirical p-values (KS two-sided, AD one-sided)
-//    4. AD parametric fitting via GG (engine='parametric')
-//    5. Cauchy combination → pCauchy
-//    6. Assemble results
-//    7. FDR: Storey q-value on pCauchy
-//
-//  KS p-value: always empirical (KS null ES is signed,
-//              gamma approximation inapplicable)
-//  AD p-value: parametric GG when engine='parametric',
-//              empirical fallback when fit fails
-//  FDR:        Storey q-value on pCauchy; estimates π₀
-//              (proportion of true nulls) for improved power
-//              over BH under positive correlation
+//  core/gsea.js  ·  v2.9 (Original GSEA Empirical FDR)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import {
   calcSNR, rankOrder, calcGSEAStats,
   cauchyCombine, shuffle,
-  calcNES, calcNES_AD, empP_KS, empP_AD,
-  storeyQ
+  calcNES, calcNES_AD, empP_KS, empP_AD
 } from './math.js';
 
 import { pvalGG } from './distributions.js';
 
 const MAX_PERMS       = 2000;
 const TARGET_CHUNK_MS = 16;
+
+// ── Helper: 二分查找用于快速统计大于等于/小于等于某个值的数量 ──
+function countGTE(sortedArr, val) {
+  let l = 0, r = sortedArr.length - 1;
+  while (l <= r) {
+    const m = (l + r) >> 1;
+    if (sortedArr[m] >= val) r = m - 1;
+    else l = m + 1;
+  }
+  return sortedArr.length - l;
+}
+
+function countLTE(sortedArr, val) {
+  let l = 0, r = sortedArr.length - 1;
+  while (l <= r) {
+    const m = (l + r) >> 1;
+    if (sortedArr[m] <= val) l = m + 1;
+    else r = m - 1;
+  }
+  return l;
+}
 
 export async function runGSEA(opts) {
   const {
@@ -73,17 +76,12 @@ export async function runGSEA(opts) {
   if (_ab()) throw new Error('Aborted');
 
   // ── 2. Permutations ───────────────────────────────────────
-  // nullKS[pi][j] = KS enrichment score for pathway pi,
-  //                 permutation j  (signed, can be negative)
-  // nullAD[pi][j] = AD statistic  (always non-negative)
   const nullKS = Array.from({ length: nP }, () => new Float64Array(nPerms));
   const nullAD = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
   const permArr = new Uint16Array(nS);
   for (let i = 0; i < nS; i++) permArr[i] = i;
 
-  // Float32 for permutation SNR: halves memory bandwidth,
-  // precision sufficient for ranking only
   const permSNR = new Float32Array(nG);
   const permOrd = new Array(nG);
   const permC   = permArr.subarray(0, nCase);
@@ -122,11 +120,7 @@ export async function runGSEA(opts) {
 
     const totalElapsed = (performance.now() - t0) / 1000;
     const pct  = Math.round(done / nPerms * 75);
-    const eta  = totalElapsed > 0.1
-      ? ((nPerms - done) / (done / totalElapsed)).toFixed(0) : '—';
-    const rate = (done / (totalElapsed + 0.001)).toFixed(0);
-    onProgress(pct, 'Permutations',
-      `${done}/${nPerms} · ETA ${eta}s · ${rate} perm/s`);
+    onProgress(pct, 'Permutations', `${done}/${nPerms} permutations`);
 
     await _yield();
   }
@@ -151,29 +145,16 @@ export async function runGSEA(opts) {
       nes:     calcNES(ok, nullKS[pi]),
       nes_ad:  calcNES_AD(oa, nullAD[pi])
     };
-
-    if (pi % 50 === 49) {
-      onProgress(76, 'Statistics',
-        `Empirical p-values (${pi + 1}/${nP})…`);
-      await _yield();
-    }
   }
 
   if (_ab()) throw new Error('Aborted');
 
   // ── 4. AD parametric fitting (engine = 'parametric') ──────
-  // KS always uses empirical p-values:
-  //   null KS ES is signed (positive and negative), making
-  //   gamma approximation inapplicable.
-  // AD uses GG parametric approximation when requested:
-  //   AD statistic is always non-negative, GG fit is appropriate.
-  //   Falls back to empirical if fit fails.
   const useParam    = engine === 'parametric';
   const pKS_arr     = new Array(nP);
   const pAD_arr     = new Array(nP);
   const pAD_par_arr = new Array(nP).fill(null);
 
-  // KS: always empirical
   for (let pi = 0; pi < nP; pi++) {
     pKS_arr[pi] = empArr[pi].pKS_emp;
   }
@@ -181,112 +162,142 @@ export async function runGSEA(opts) {
   if (useParam) {
     onProgress(80, 'Fitting', 'Fitting AD null distributions (GG)…');
     await _yield();
-
-    let fitSuccess = 0;
     for (let pi = 0; pi < nP; pi++) {
       if (_ab()) throw new Error('Aborted');
-
       const r   = empArr[pi];
       const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
-
       if (res.fitted) {
         pAD_par_arr[pi] = res.p;
         pAD_arr[pi]     = res.p;
-        fitSuccess++;
       } else {
         pAD_arr[pi] = r.pAD_emp;
       }
-
-      // Yield every 5 pathways: each pvalGG call runs Nelder-Mead
-      // (up to 1000 iterations), so 5 pathways ≈ 5-25ms
-      if (pi % 5 === 4 || pi === nP - 1) {
-        const pct = 80 + Math.round(((pi + 1) / nP) * 10);
-        onProgress(pct, 'Fitting',
-          `AD fitting (${pi + 1}/${nP}) · fitted: ${fitSuccess}`);
-        await _yield();
-      }
+      if (pi % 10 === 0) await _yield();
     }
-
-    console.log(`GG fit: ${fitSuccess}/${nP} pathways fitted parametrically`);
   } else {
-    for (let pi = 0; pi < nP; pi++) {
-      pAD_arr[pi] = empArr[pi].pAD_emp;
-    }
+    for (let pi = 0; pi < nP; pi++) pAD_arr[pi] = empArr[pi].pAD_emp;
   }
 
-  if (_ab()) throw new Error('Aborted');
-
   // ── 5. Cauchy combination ─────────────────────────────────
-  // Combines pKS (empirical) and pAD (parametric or empirical)
-  // into a single p-value per pathway.
-  // Liu & Xie (2020): robust to correlation between input p-values.
-  onProgress(91, 'Combining', 'Cauchy combination…');
-  await _yield();
-
   const pCauchy_arr = new Array(nP);
   for (let pi = 0; pi < nP; pi++) {
     pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  // ── 6. Assemble results ───────────────────────────────────
-  // FDR is filled in step 7 after assembly.
-  onProgress(93, 'Assembling', 'Assembling results…');
+  // ── 6. 提取 GSEA 经验 FDR 需要的所有分布数据 ──────────────
+  onProgress(93, 'FDR', 'Building Global NES Distributions…');
   await _yield();
+
+  // 为每个通路计算均值，用于将 Null ES 转化为 Null NES
+  const allPermNES_pos = [];
+  const allPermNES_neg = [];
+  const allPermNES_AD  = [];
+
+  const obsNES_pos = [];
+  const obsNES_neg = [];
+  const obsNES_AD  = [];
+
+  for (let pi = 0; pi < nP; pi++) {
+    let sumPosKS = 0, countPosKS = 0;
+    let sumNegKS = 0, countNegKS = 0;
+    let sumAD = 0;
+
+    for (let j = 0; j < nPerms; j++) {
+      const ks = nullKS[pi][j];
+      if (ks >= 0) { sumPosKS += ks; countPosKS++; }
+      else         { sumNegKS += ks; countNegKS++; }
+      sumAD += nullAD[pi][j];
+    }
+
+    const meanPosKS = countPosKS > 0 ? sumPosKS / countPosKS : 0;
+    const meanNegKS = countNegKS > 0 ? Math.abs(sumNegKS / countNegKS) : 0;
+    const meanAD    = sumAD / nPerms;
+
+    // 构建全排列背景下的 NES
+    for (let j = 0; j < nPerms; j++) {
+      const ks = nullKS[pi][j];
+      if (ks >= 0) { if (meanPosKS > 0) allPermNES_pos.push(ks / meanPosKS); }
+      else         { if (meanNegKS > 0) allPermNES_neg.push(ks / meanNegKS); }
+      
+      if (meanAD > 0) allPermNES_AD.push(nullAD[pi][j] / meanAD);
+    }
+
+    // 收集真实观测结果的 NES
+    const e = empArr[pi];
+    if (e.nes >= 0) obsNES_pos.push(e.nes);
+    else obsNES_neg.push(e.nes);
+    
+    if (e.nes_ad >= 0) obsNES_AD.push(e.nes_ad);
+  }
+
+  // 对全分布排序，以便后续进行快速二分查找
+  allPermNES_pos.sort((a, b) => a - b);
+  allPermNES_neg.sort((a, b) => a - b);
+  allPermNES_AD.sort((a, b) => a - b);
+  
+  obsNES_pos.sort((a, b) => a - b);
+  obsNES_neg.sort((a, b) => a - b);
+  obsNES_AD.sort((a, b) => a - b);
+
+  // ── 7. 计算原版 GSEA 经验 FDR ───────────────────────────
+  onProgress(97, 'FDR', 'Computing Empirical FDRs…');
+  await _yield();
+
+  const getFDR = (obsVal, isPositive, obsList, permList) => {
+    if (obsList.length === 0 || permList.length === 0) return 1.0;
+    
+    let probPerm, probObs;
+    if (isPositive) {
+      probPerm = countGTE(permList, obsVal) / permList.length;
+      probObs  = countGTE(obsList, obsVal) / obsList.length;
+    } else {
+      probPerm = countLTE(permList, obsVal) / permList.length;
+      probObs  = countLTE(obsList, obsVal) / obsList.length;
+    }
+    
+    if (probObs === 0) return 1.0;
+    return Math.min(1.0, probPerm / probObs); // FDR最高为1
+  };
 
   const results = pathways.map((p, pi) => {
     const e = empArr[pi];
+    
+    // 计算 KS 对应的经验 FDR (区分正负)
+    const fdr_ks = e.nes >= 0 
+      ? getFDR(e.nes, true, obsNES_pos, allPermNES_pos)
+      : getFDR(e.nes, false, obsNES_neg, allPermNES_neg);
+
+    // 计算 AD 对应的经验 FDR (恒为正向)
+    const fdr_ad = getFDR(e.nes_ad, true, obsNES_AD, allPermNES_AD);
+
     return {
       name:    p.name,
       url:     p.url ?? null,
       size:    p.size,
 
-      // Effect sizes
-      es:      e.ok,       // raw enrichment score (signed)
-      ad:      e.oa,       // Anderson-Darling statistic
-      nes:     e.nes,      // normalised ES (KS)
-      nes_ad:  e.nes_ad,   // normalised AD
+      es:      e.ok,
+      ad:      e.oa,
+      nes:     e.nes,
+      nes_ad:  e.nes_ad,
 
-      // Primary p-values (displayed in main table columns)
-      // pKS: always empirical permutation p-value
-      // pAD: parametric GG if fitted, else empirical
       pKS:     pKS_arr[pi],
       pAD:     pAD_arr[pi],
       pCauchy: pCauchy_arr[pi],
 
-      // Empirical p-values (always available, extended columns)
       pKS_emp: e.pKS_emp,
       pAD_emp: e.pAD_emp,
-
-      // Parametric AD p-value: null when engine='permutation'
-      // or when GG fit failed (extended columns)
-      pKS_par: null,              // KS has no parametric path
+      pKS_par: null,
       pAD_par: pAD_par_arr[pi],
 
-      // FDR: filled below after assembly
-      fdr:     null,
+      // 分别输出基于 NES 和 NES_AD 计算出的原始机制 FDR
+      fdr_ks:  fdr_ks,
+      fdr_ad:  fdr_ad,
 
-      // Curve data (observed enrichment walk)
       curve:   obsStats[pi].curve,
       obsOrd,
       peakIdx: obsStats[pi].peakIdx
     };
   });
-
-  // ── 7. FDR (Storey q-value on pCauchy) ───────────────────
-  // storeyQ estimates π₀ (proportion of true nulls) from the
-  // pCauchy distribution, then applies π₀-weighted BH.
-  // More powerful than plain BH under positive correlation;
-  // reduces to BH when π₀ cannot be estimated reliably (nP < 10).
-  onProgress(97, 'FDR', 'Storey q-value…');
-  await _yield();
-
-  if (nP >= 2) {
-    const qArr = storeyQ(pCauchy_arr);
-    results.forEach((r, i) => { r.fdr = qArr[i]; });
-  } else {
-    // Single pathway: FDR not meaningful, mirror pCauchy
-    results[0].fdr = results[0].pCauchy;
-  }
 
   onProgress(100, 'Done', `${results.length} pathway(s) complete`);
   return results;
