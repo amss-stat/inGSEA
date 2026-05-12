@@ -7,20 +7,22 @@
 //    3. Empirical p-values (KS two-sided, AD one-sided)
 //    4. AD parametric fitting via GG (engine='parametric')
 //    5. Cauchy combination → pCauchy
-//    6. Permutation FDR on pCauchy (reuses nullKS/nullAD)
+//    6. Assemble results
+//    7. FDR: Storey q-value on pCauchy
 //
 //  KS p-value: always empirical (KS null ES is signed,
 //              gamma approximation inapplicable)
 //  AD p-value: parametric GG when engine='parametric',
 //              empirical fallback when fit fails
-//  FDR:        permutation-based, preserves inter-pathway
-//              correlation structure, no distribution assumption
+//  FDR:        Storey q-value on pCauchy; estimates π₀
+//              (proportion of true nulls) for improved power
+//              over BH under positive correlation
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import {
   calcSNR, rankOrder, calcGSEAStats,
-  cauchyCombine, bhFDR, shuffle,
+  cauchyCombine, shuffle,
   calcNES, calcNES_AD, empP_KS, empP_AD,
   storeyQ
 } from './math.js';
@@ -112,7 +114,6 @@ export async function runGSEA(opts) {
 
     done = end;
 
-    // Adaptive chunk sizing: target TARGET_CHUNK_MS per chunk
     const elapsed = performance.now() - tChunk;
     if (elapsed > 0 && done < nPerms) {
       const newChunk = Math.round(chunkSize * TARGET_CHUNK_MS / elapsed);
@@ -167,7 +168,6 @@ export async function runGSEA(opts) {
   // AD uses GG parametric approximation when requested:
   //   AD statistic is always non-negative, GG fit is appropriate.
   //   Falls back to empirical if fit fails.
-
   const useParam    = engine === 'parametric';
   const pKS_arr     = new Array(nP);
   const pAD_arr     = new Array(nP);
@@ -187,8 +187,6 @@ export async function runGSEA(opts) {
       if (_ab()) throw new Error('Aborted');
 
       const r   = empArr[pi];
-      // nullAD[pi] is Float64Array — pvalGG handles TypedArray directly
-      // (pvalGG builds a plain Array internally via new Array(n) + index)
       const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
 
       if (res.fitted) {
@@ -211,7 +209,6 @@ export async function runGSEA(opts) {
 
     console.log(`GG fit: ${fitSuccess}/${nP} pathways fitted parametrically`);
   } else {
-    // Permutation engine: both KS and AD use empirical p-values
     for (let pi = 0; pi < nP; pi++) {
       pAD_arr[pi] = empArr[pi].pAD_emp;
     }
@@ -231,22 +228,9 @@ export async function runGSEA(opts) {
     pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  // ── 6. FDR (Storey q-value on pCauchy) ───────────────────
-  // storeyQ estimates π₀ (proportion of true nulls) from the
-  // pCauchy distribution, then applies π₀-weighted BH.
-  // More powerful than BH under positive correlation;
-  // reduces to BH when π₀ cannot be estimated (m < 10).
-  onProgress(93, 'FDR', 'Storey q-value…');
-  await _yield();
-
-  const qArr        = nP >= 2
-    ? storeyQ(pCauchy_arr)
-    : Float64Array.from(pCauchy_arr);   // single pathway: q = p
-
-  results.forEach((r, i) => { r.fdr = qArr[i]; });
-
-  // ── 7. Assemble results ───────────────────────────────────
-  onProgress(98, 'Assembling', 'Assembling results…');
+  // ── 6. Assemble results ───────────────────────────────────
+  // FDR is filled in step 7 after assembly.
+  onProgress(93, 'Assembling', 'Assembling results…');
   await _yield();
 
   const results = pathways.map((p, pi) => {
@@ -257,36 +241,52 @@ export async function runGSEA(opts) {
       size:    p.size,
 
       // Effect sizes
-      es:      e.ok,          // raw enrichment score (signed)
-      ad:      e.oa,          // Anderson-Darling statistic
-      nes:     e.nes,         // normalised ES (KS)
-      nes_ad:  e.nes_ad,      // normalised AD
+      es:      e.ok,       // raw enrichment score (signed)
+      ad:      e.oa,       // Anderson-Darling statistic
+      nes:     e.nes,      // normalised ES (KS)
+      nes_ad:  e.nes_ad,   // normalised AD
 
-      // Primary p-values (displayed in table)
+      // Primary p-values (displayed in main table columns)
       // pKS: always empirical permutation p-value
       // pAD: parametric GG if fitted, else empirical
       pKS:     pKS_arr[pi],
       pAD:     pAD_arr[pi],
       pCauchy: pCauchy_arr[pi],
 
-      // Empirical p-values (always available, shown in extended cols)
+      // Empirical p-values (always available, extended columns)
       pKS_emp: e.pKS_emp,
       pAD_emp: e.pAD_emp,
 
       // Parametric AD p-value: null when engine='permutation'
-      // or when GG fit failed; shown in extended cols
-      pKS_par: null,          // KS has no parametric path
+      // or when GG fit failed (extended columns)
+      pKS_par: null,              // KS has no parametric path
       pAD_par: pAD_par_arr[pi],
 
-      // FDR: permutation-based on pCauchy
-      fdr:     fdrArr[pi],
+      // FDR: filled below after assembly
+      fdr:     null,
 
-      // Curve data (only for observed, not permutations)
+      // Curve data (observed enrichment walk)
       curve:   obsStats[pi].curve,
       obsOrd,
       peakIdx: obsStats[pi].peakIdx
     };
   });
+
+  // ── 7. FDR (Storey q-value on pCauchy) ───────────────────
+  // storeyQ estimates π₀ (proportion of true nulls) from the
+  // pCauchy distribution, then applies π₀-weighted BH.
+  // More powerful than plain BH under positive correlation;
+  // reduces to BH when π₀ cannot be estimated reliably (nP < 10).
+  onProgress(97, 'FDR', 'Storey q-value…');
+  await _yield();
+
+  if (nP >= 2) {
+    const qArr = storeyQ(pCauchy_arr);
+    results.forEach((r, i) => { r.fdr = qArr[i]; });
+  } else {
+    // Single pathway: FDR not meaningful, mirror pCauchy
+    results[0].fdr = results[0].pCauchy;
+  }
 
   onProgress(100, 'Done', `${results.length} pathway(s) complete`);
   return results;
