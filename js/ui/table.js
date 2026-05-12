@@ -1,110 +1,86 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  Results table renderer & sorter
+//  ui/table.js  ·  Results table
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
-import { inferMSigDBUrl } from './fileio.js';
+import { msigdbUrl } from './fileio.js';
 
-const DEFAULT_COLS = [
-  { id: 'rank',     label: '#',              extra: false, sortable: false },
-  { id: 'name',     label: 'Pathway',        extra: false, sortable: true  },
-  { id: 'size',     label: 'Size',           extra: false, sortable: true  },
-  { id: 'nes',      label: 'NES',            extra: false, sortable: true  },
-  { id: 'nes_ad',   label: 'NES-AD',         extra: false, sortable: true  },
-  { id: 'pKS',      label: 'p<sub>KS</sub>', extra: false, sortable: true  },
-  { id: 'pAD',      label: 'p<sub>AD</sub>', extra: false, sortable: true  },
-  { id: 'pCauchy',  label: 'p<sub>Cauchy</sub>', extra: false, sortable: true },
-  { id: 'fdr',      label: 'FDR',            extra: false, sortable: true, fdrCol: true },
-  // Extended (hidden by default)
-  { id: 'es',       label: 'ES',             extra: true,  sortable: true  },
-  { id: 'ad',       label: 'AD',             extra: true,  sortable: true  },
-  { id: 'pKS_emp',  label: 'p<sub>KS</sub> (emp)', extra: true, sortable: true },
-  { id: 'pAD_emp',  label: 'p<sub>AD</sub> (emp)', extra: true, sortable: true },
+// Column definitions — order is render order
+const COLS = [
+  { id:'rank',    hdr:'#',                      extra:false, sort:false },
+  { id:'name',    hdr:'Pathway',                extra:false, sort:true  },
+  { id:'size',    hdr:'Size',                   extra:false, sort:true  },
+  { id:'nes',     hdr:'NES',                    extra:false, sort:true  },
+  { id:'nes_ad',  hdr:'NES-AD',                 extra:false, sort:true  },
+  { id:'pKS',     hdr:'p<sub>KS</sub>',         extra:false, sort:true  },
+  { id:'pAD',     hdr:'p<sub>AD</sub>',         extra:false, sort:true  },
+  { id:'pCauchy', hdr:'p<sub>Cauchy</sub>',     extra:false, sort:true  },
+  { id:'fdr',     hdr:'FDR',                    extra:false, sort:true, fdrOnly:true },
+  // Extended
+  { id:'es',      hdr:'ES',                     extra:true,  sort:true  },
+  { id:'ad',      hdr:'AD',                     extra:true,  sort:true  },
+  { id:'pKS_emp', hdr:'p<sub>KS</sub> (emp)',   extra:true,  sort:true  },
+  { id:'pAD_emp', hdr:'p<sub>AD</sub> (emp)',   extra:true,  sort:true  },
 ];
 
-let sortCol = 'pCauchy', sortDir = 1;   // 1=asc, -1=desc
+// Sort state
+let _sortCol = 'pCauchy';
+let _sortDir = 1;           // 1 = ascending, -1 = descending
 
 /**
- * Render the full results table.
+ * Render (or re-render) the results table.
  *
- * @param {object[]} results
- * @param {boolean}  showFDR    – if >10 pathways
- * @param {string}   engine     – 'gg' | 'empirical'
- * @param {Function} onSelect   – callback(result) when pathway name clicked
+ * @param {object[]} results   GSEA result array
+ * @param {boolean}  showFDR  show FDR column (true when nPathways > 10)
+ * @param {string}   engine   'gg' | 'empirical'
+ * @param {Function} onSelect callback(result) when a row's plot button is clicked
  */
 export function renderTable(results, showFDR, engine, onSelect) {
-  _buildHeader(showFDR, engine);
-  _buildBody(results, showFDR, engine, onSelect);
-  _attachSort(results, showFDR, engine, onSelect);
+  _buildHead(showFDR, engine);
+  _buildBody(results, showFDR, onSelect);
+  _attachSort(results, showFDR, onSelect);
 }
 
-function _buildHeader(showFDR, engine) {
-  const thead = document.getElementById('rt-head');
-  const visibleCols = DEFAULT_COLS.filter(c => {
-    if (c.fdrCol && !showFDR) return false;
+// ── Header ───────────────────────────────────────────────────
+function _buildHead(showFDR, engine) {
+  const isGG = engine === 'gg';
+  const labelOverride = {
+    pKS:    isGG ? 'p<sub>KS</sub>&thinsp;<small>(Γ)</small>'   : 'p<sub>KS</sub>',
+    pAD:    isGG ? 'p<sub>AD</sub>&thinsp;<small>(GΓ)</small>'  : 'p<sub>AD</sub>',
+  };
+
+  const visibleCols = COLS.filter(c => {
+    if (c.fdrOnly && !showFDR) return false;
     return true;
   });
 
-  // Column label overrides for engine
-  const labelMap = {
-    pKS:     engine === 'gg' ? 'p<sub>KS</sub> <span style="font-size:8px;color:var(--muted)">(Γ)</span>'     : 'p<sub>KS</sub>',
-    pAD:     engine === 'gg' ? 'p<sub>AD</sub> <span style="font-size:8px;color:var(--muted)">(GΓ)</span>'    : 'p<sub>AD</sub>',
-    pCauchy: engine === 'gg' ? 'p<sub>Cauchy</sub>' : 'p<sub>Cauchy</sub>',
-  };
+  const ths = visibleCols.map(c => {
+    const lbl   = labelOverride[c.id] ?? c.hdr;
+    const xCls  = c.extra ? 'col-ext' : '';
+    const sCls  = c.sort  ? 'sortable' : '';
+    const arrow = c.sort  ? '<span class="si"></span>' : '';
+    return `<th class="${xCls} ${sCls}" data-col="${c.id}">${lbl}${arrow}</th>`;
+  });
 
-  thead.innerHTML = `<tr>${visibleCols.map(c => {
-    const lbl   = labelMap[c.id] || c.label;
-    const extra = c.extra ? 'col-extra' : '';
-    const sort  = c.sortable ? 'sortable' : '';
-    const arrow = c.sortable ? '<span class="sort-icon"></span>' : '';
-    return `<th class="${extra} ${sort}" data-col="${c.id}">${lbl}${arrow}</th>`;
-  }).join('')}</tr>`;
+  document.getElementById('rt-head').innerHTML = `<tr>${ths.join('')}</tr>`;
 }
 
-function _buildBody(results, showFDR, engine, onSelect) {
+// ── Body ─────────────────────────────────────────────────────
+function _buildBody(results, showFDR, onSelect) {
+  const sorted = _sorted(results);
   const tbody  = document.getElementById('tbody');
-  const sorted = _sortResults([...results], sortCol, sortDir);
   tbody.innerHTML = '';
 
-  sorted.forEach((r, i) => {
+  sorted.forEach((r, rank) => {
     const tr = document.createElement('tr');
     tr.dataset.name = r.name;
 
-    const url     = inferMSigDBUrl(r.name, r.url);
-    const pKS     = r.pKS_fit,  pAD = r.pAD_fit,  pC = r.pCauchy;
-    const pKSe    = r.pKS_emp,  pADe = r.pAD_emp;
-    const fdr     = r.fdr;
+    const url   = msigdbUrl(r.name, r.url);
+    const cells = _cells(r, rank, url, showFDR);
+    tr.innerHTML = cells;
 
-    const pcls = p => p < 0.001 ? 'sig001' : p < 0.01 ? 'sig01' : p < 0.05 ? 'sig05' : '';
-
-    // Build cells in column order
-    const cells = {
-      rank:    `<td style="color:var(--muted);font-size:11px">${i + 1}</td>`,
-      name:    `<td class="pname">
-                  <a class="path-link" href="${url}" target="_blank"
-                     title="${esc(r.name)}">${esc(r.name)}</a>
-                  <span class="view-curve" data-name="${esc(r.name)}" title="View enrichment plot">📈</span>
-                </td>`,
-      size:    `<td class="num" style="color:var(--text2)">${r.size}</td>`,
-      nes:     `<td class="num ${r.nes  >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`,
-      nes_ad:  `<td class="num ${r.nes_ad >= 0 ? 'pos' : 'neg'}">${r.nes_ad.toFixed(3)}</td>`,
-      pKS:     `<td class="pval ${pcls(pKS)}">${fmtP(pKS)}</td>`,
-      pAD:     `<td class="pval ${pcls(pAD)}">${fmtP(pAD)}</td>`,
-      pCauchy: `<td class="pval ${pcls(pC)}">${fmtP(pC)}</td>`,
-      fdr:     showFDR ? `<td class="fdr-val ${fdr != null && fdr < 0.05 ? 'sig' : ''}">${fdr != null ? fmtP(fdr) : '—'}</td>` : '',
-      // Extended
-      es:      `<td class="num col-extra ${r.es >= 0 ? 'pos' : 'neg'}">${r.es.toFixed(4)}</td>`,
-      ad:      `<td class="num col-extra">${r.ad.toFixed(2)}</td>`,
-      pKS_emp: `<td class="pval col-extra ${pcls(pKSe)}">${fmtP(pKSe)}</td>`,
-      pAD_emp: `<td class="pval col-extra ${pcls(pADe)}">${fmtP(pADe)}</td>`,
-    };
-
-    const visibleCols = DEFAULT_COLS.filter(c => !(c.fdrCol && !showFDR));
-    tr.innerHTML = visibleCols.map(c => cells[c.id] || '').join('');
-
-    // "View curve" click
-    tr.querySelector('.view-curve')?.addEventListener('click', e => {
-      e.preventDefault();
+    // Plot button
+    tr.querySelector('.btn-plot')?.addEventListener('click', e => {
       e.stopPropagation();
       _selectRow(tr);
       onSelect(r);
@@ -113,14 +89,96 @@ function _buildBody(results, showFDR, engine, onSelect) {
     tbody.appendChild(tr);
   });
 
-  // Auto-select first row
+  // Auto-select + plot first row
   const first = tbody.firstElementChild;
   if (first) {
     first.classList.add('sel');
-    const firstName = first.dataset.name;
-    const firstResult = results.find(r => r.name === firstName);
-    if (firstResult) onSelect(firstResult);
+    const name = first.dataset.name;
+    const r    = results.find(x => x.name === name);
+    if (r) onSelect(r);
   }
+}
+
+function _cells(r, rank, url, showFDR) {
+  const pc = p =>
+    p == null ? '' :
+    p < 0.001 ? 's001' :
+    p < 0.01  ? 's01'  :
+    p < 0.05  ? 's05'  : '';
+
+  const fp = p =>
+    p == null ? '—' :
+    Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
+
+  // Build a map of cell HTML per column id
+  const C = {
+    rank:    `<td class="cn">${rank + 1}</td>`,
+    name:    `<td class="cpname">
+                <a class="path-link" href="${url}" target="_blank"
+                   rel="noopener" title="${_esc(r.name)}">${_esc(r.name)}</a
+                ><button class="btn-plot" title="View enrichment plot">📈</button>
+              </td>`,
+    size:    `<td class="num neu">${r.size}</td>`,
+    nes:     `<td class="num ${r.nes    >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`,
+    nes_ad:  `<td class="num ${r.nes_ad >= 0 ? 'pos' : 'neg'}">${r.nes_ad.toFixed(3)}</td>`,
+    pKS:     `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`,
+    pAD:     `<td class="pv ${pc(r.pAD)}">${fp(r.pAD)}</td>`,
+    pCauchy: `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`,
+    fdr:     showFDR
+               ? `<td class="fv ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">${fp(r.fdr)}</td>`
+               : '',
+    // Extended
+    es:      `<td class="num col-ext ${r.es >= 0 ? 'pos' : 'neg'}">${r.es.toFixed(4)}</td>`,
+    ad:      `<td class="num col-ext neu">${r.ad.toFixed(2)}</td>`,
+    pKS_emp: `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`,
+    pAD_emp: `<td class="pv col-ext ${pc(r.pAD_emp)}">${fp(r.pAD_emp)}</td>`,
+  };
+
+  return COLS
+    .filter(c => !(c.fdrOnly && !showFDR))
+    .map(c => C[c.id] ?? '')
+    .join('');
+}
+
+// ── Sort ─────────────────────────────────────────────────────
+function _attachSort(results, showFDR, onSelect) {
+  document.querySelectorAll('#rt-head th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      _sortDir = col === _sortCol ? -_sortDir : 1;
+      _sortCol = col;
+      // Update header arrows
+      document.querySelectorAll('#rt-head th').forEach(h => {
+        h.classList.remove('sort-asc', 'sort-desc');
+      });
+      th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+      _buildBody(results, showFDR, onSelect);
+    });
+  });
+}
+
+function _sorted(results) {
+  const key = {
+    name:    r => r.name,
+    size:    r => r.size,
+    nes:     r => r.nes,
+    nes_ad:  r => r.nes_ad,
+    pKS:     r => r.pKS,
+    pAD:     r => r.pAD,
+    pCauchy: r => r.pCauchy,
+    fdr:     r => r.fdr ?? 1,
+    es:      r => r.es,
+    ad:      r => r.ad,
+    pKS_emp: r => r.pKS_emp,
+    pAD_emp: r => r.pAD_emp,
+  }[_sortCol] ?? (r => r.pCauchy);
+
+  return [...results].sort((a, b) => {
+    const av = key(a), bv = key(b);
+    return typeof av === 'string'
+      ? _sortDir * av.localeCompare(bv)
+      : _sortDir * (av - bv);
+  });
 }
 
 function _selectRow(tr) {
@@ -128,54 +186,4 @@ function _selectRow(tr) {
   tr.classList.add('sel');
 }
 
-function _attachSort(results, showFDR, engine, onSelect) {
-  document.querySelectorAll('#rt-head th.sortable').forEach(th => {
-    th.addEventListener('click', () => {
-      const col = th.dataset.col;
-      if (sortCol === col) {
-        sortDir = -sortDir;
-      } else {
-        sortCol = col;
-        sortDir = 1;
-      }
-      // Update header arrows
-      document.querySelectorAll('#rt-head th').forEach(h => {
-        h.classList.remove('sort-asc', 'sort-desc');
-      });
-      th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
-      _buildBody(results, showFDR, engine, onSelect);
-    });
-  });
-}
-
-function _sortResults(res, col, dir) {
-  const key = {
-    name:    r => r.name,
-    size:    r => r.size,
-    nes:     r => r.nes,
-    nes_ad:  r => r.nes_ad,
-    pKS:     r => r.pKS_fit,
-    pAD:     r => r.pAD_fit,
-    pCauchy: r => r.pCauchy,
-    fdr:     r => r.fdr ?? 1,
-    es:      r => r.es,
-    ad:      r => r.ad,
-    pKS_emp: r => r.pKS_emp,
-    pAD_emp: r => r.pAD_emp,
-  }[col] || (r => r.pCauchy);
-
-  return res.sort((a, b) => {
-    const av = key(a), bv = key(b);
-    if (typeof av === 'string') return dir * av.localeCompare(bv);
-    return dir * (av - bv);
-  });
-}
-
-export function fmtP(p) {
-  if (p == null) return '—';
-  return Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
-}
-
-function esc(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+const _esc = s => (s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
