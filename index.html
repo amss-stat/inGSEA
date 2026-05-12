@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>iGSEA · Improved Gene Set Enrichment Analysis</title>
+  <!-- Issue: favicon 404 fix -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='3' fill='none' stroke='%231a5fa8' stroke-width='1.5'/><polyline points='4,22 9,14 14,17.5 21,7 28,12' stroke='%231a5fa8' stroke-width='1.8' fill='none'/><circle cx='21' cy='7' r='2.2' fill='%23d9480f'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
@@ -62,9 +64,7 @@
     <div class="dz" id="dz-path">
       <input type="file" id="fi-path" accept=".gmt,.txt">
       <div class="dz-icon">🧬</div>
-      <div class="dz-hint">
-        Drop MSigDB GMT or TXT here
-      </div>
+      <div class="dz-hint">Drop MSigDB GMT or TXT here</div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
     </div>
@@ -102,19 +102,22 @@
              value="1" min="0" max="3" step="0.5">
     </div>
 
+    <!-- Issue: label not associated — use div instead of label -->
     <div class="fg">
-      <label class="fl">Pathway selection</label>
+      <div class="fl">Pathway selection</div>
       <div class="pm-tabs" role="tablist">
         <button class="pm-tab active" data-mode="all">All</button>
         <button class="pm-tab" data-mode="single">Single</button>
         <button class="pm-tab" data-mode="multi">Multi</button>
       </div>
       <div id="sel-single-wrap" style="display:none;margin-top:6px">
+        <label class="fl" for="sel-single">Select pathway</label>
         <select class="fi" id="sel-single">
           <option value="">— choose pathway —</option>
         </select>
       </div>
       <div id="sel-multi-wrap" style="display:none;margin-top:6px">
+        <label class="fl" for="sel-multi">Select pathways</label>
         <select class="fi" id="sel-multi" multiple size="5"></select>
         <div class="hint-sub" style="margin-top:3px">
           Ctrl &amp; click to select multiple
@@ -192,13 +195,13 @@
 
   <div id="res-panel" style="display:none">
 
-    <!-- Toolbar -->
     <div class="res-toolbar">
       <div class="res-toolbar-left">
         <span class="res-count" id="res-count"></span>
       </div>
       <div class="res-toolbar-right">
-        <label class="toggle-lbl">
+        <!-- Issue: nested input in label — correctly associated -->
+        <label class="toggle-lbl" for="chk-extra">
           <input type="checkbox" id="chk-extra"> Extended columns
         </label>
         <button class="btn-secondary btn-sm" id="btn-dl">⬇ Export CSV</button>
@@ -209,14 +212,13 @@
       </div>
     </div>
 
-    <!-- Issue (2): FDR note hidden by default -->
+    <!-- FDR note: hidden by default, shown when extended + >10 pathways -->
     <div class="fdr-note" id="fdr-note" style="display:none">
       <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5)
       when most pathways are null — this is expected and statistically correct.
       FDR control is stringent with many pathways tested simultaneously.
     </div>
 
-    <!-- Results table -->
     <div class="tbl-wrap">
       <table class="rt" id="rt">
         <thead id="rt-head"></thead>
@@ -224,14 +226,13 @@
       </table>
     </div>
 
-    <!-- Issue (3): NES bar chart section -->
+    <!-- NES bar chart -->
     <div class="nes-chart-section" id="nes-chart-section" style="display:none">
       <div class="plot-toolbar" style="margin-bottom:8px">
         <div class="plot-title-group">
           <span class="plot-lbl">NES Overview</span>
         </div>
         <div class="plot-controls">
-          <!-- toggle shown only when >20 pathways -->
           <button class="btn-secondary btn-sm" id="btn-toggle-nes"
                   style="display:none">▼ Show chart</button>
           <button class="btn-secondary btn-sm" id="btn-dl-nes"
@@ -243,7 +244,7 @@
       </div>
     </div>
 
-    <!-- Enrichment score curve -->
+    <!-- Enrichment curve -->
     <div class="plot-section" id="plot-section" style="display:none">
       <div class="plot-toolbar">
         <div class="plot-title-group">
@@ -261,7 +262,6 @@
                   title="Reset zoom to full view">⊡ Reset zoom</button>
           <button class="btn-secondary btn-sm" id="btn-dl-one-curve"
                   title="Download this enrichment curve as PNG">⬇ PNG</button>
-          <!-- Issue (4): removed scroll/drag/dbl-click hint text -->
         </div>
       </div>
       <div class="svg-wrap" id="svg-wrap"></div>
