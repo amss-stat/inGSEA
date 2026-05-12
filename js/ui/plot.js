@@ -1,13 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/plot.js  ·  v2.6
-//  Changes:
-//  • Zoom hint: only show rank range when zoomed, silent otherwise
-//  • NES-AD always neutral colour in renderESStats
-//  • drawNESChart: no tick marks, zero line only, long-name
-//    truncation with SVG title tooltip, download support
-//  • NES chart collapse when >20 pathways handled in main.js
-//  • exportSVGAsPNG exported for NES chart download
-//  • exportCurrentCurvePNG / exportAllCurves for curve export
+//  ui/plot.js  ·  v2.7
+//  Changes from v2.6:
+//  • renderESStats: pKS label always "(perm)" since KS
+//    no longer has a parametric path
+//  • pAD label reflects engine choice (par vs perm)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -168,7 +164,6 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
   }
 
   const xMid     = _f(M.l + pw / 2);
-  // Issue (4): only show rank range when zoomed; no interaction instructions
   const isZoomed = zoom.i0 > 0.001 || zoom.i1 < 0.999;
   const zoomTxt  = isZoomed ? `Rank ${r0 + 1} – ${r1 + 1}` : '';
 
@@ -241,7 +236,7 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
         text-anchor="middle" fill="#7a8698"
         font-size="11" font-weight="500">Gene rank</text>
 
-  <!-- Issue (4): zoom range label, only shown when zoomed -->
+  <!-- Zoom range label -->
   <text x="${M.l+pw-2}" y="${M.t+13}" text-anchor="end"
         fill="#a05c07" font-size="8.5" font-style="italic"
         opacity="${isZoomed ? 1 : 0}">${_esc(zoomTxt)}</text>
@@ -277,14 +272,12 @@ function _attachInteraction(container, result, pathways, geneNames) {
   const tooltip = document.getElementById('svg-tooltip');
   if (!svgEl || !overlay || !tooltip) return;
 
-  // Derive layout from current zoom
   const pw  = parseInt(svgEl.getAttribute('width'),  10) - M.l - M.r;
   const ph  = SVG_H - M.t - M.b - M.hitH - 6;
   const r0  = Math.max(0,    Math.floor(_zoom.i0 * (nG - 1)));
   const r1  = Math.min(nG-1, Math.ceil (_zoom.i1 * (nG - 1)));
   const nVis = r1 - r0 + 1;
 
-  // Re-derive Y scale
   let lo = 0, hi = 0;
   for (let i = r0; i <= r1; i++) {
     if (curve[i] < lo) lo = curve[i];
@@ -307,7 +300,6 @@ function _attachInteraction(container, result, pathways, geneNames) {
 
   let _isDragging = false;
 
-  // ── Hover tooltip ──────────────────────────────────────────
   overlay.addEventListener('mousemove', e => {
     if (_isDragging) return;
     const pt   = toSVGPt(e.clientX, e.clientY);
@@ -340,7 +332,6 @@ function _attachInteraction(container, result, pathways, geneNames) {
     tooltip.style.display = 'none';
   };
 
-  // ── Scroll zoom ────────────────────────────────────────────
   overlay.addEventListener('wheel', e => {
     e.preventDefault();
     _ctm = null;
@@ -357,7 +348,6 @@ function _attachInteraction(container, result, pathways, geneNames) {
     _render();
   }, { passive: false });
 
-  // ── Drag to pan ────────────────────────────────────────────
   let _drag = null;
 
   overlay.addEventListener('mousedown', e => {
@@ -401,7 +391,6 @@ function _attachInteraction(container, result, pathways, geneNames) {
   window.addEventListener('mousemove', _onMove, { passive: true });
   window.addEventListener('mouseup',   _onUp);
 
-  // Clean up window listeners when SVG is replaced
   const obs = new MutationObserver(() => {
     window.removeEventListener('mousemove', _onMove);
     window.removeEventListener('mouseup',   _onUp);
@@ -409,14 +398,12 @@ function _attachInteraction(container, result, pathways, geneNames) {
   });
   obs.observe(container, { childList: true });
 
-  // ── Double-click reset ─────────────────────────────────────
   overlay.addEventListener('dblclick', () => {
     _zoom = { i0: 0, i1: 1 };
     _ctm  = null;
     _render();
   });
 
-  // ── Resize ─────────────────────────────────────────────────
   const _onResize = () => { _ctm = null; };
   window.addEventListener('resize', _onResize, { passive: true });
   const obs2 = new MutationObserver(() => {
@@ -440,13 +427,14 @@ export function renderESStats(result, engine, showFDR) {
     { l: 'NES',
       v: result.nes.toFixed(3),
       c: result.nes >= 0 ? 'pos' : 'neg' },
-    // Issue (5): NES-AD always neutral — AD statistic is always positive
     { l: 'NES-AD',
       v: result.nes_ad.toFixed(3),
       c: '' },
-    { l: isPar ? 'p<sub>KS</sub>&thinsp;(par)' : 'p<sub>KS</sub>',
+    // KS: always permutation-based
+    { l: 'p<sub>KS</sub>&thinsp;(perm)',
       v: fmt(result.pKS),
       c: sc(result.pKS) },
+    // AD: label reflects engine choice
     { l: isPar ? 'p<sub>AD</sub>&thinsp;(par)' : 'p<sub>AD</sub>',
       v: fmt(result.pAD),
       c: sc(result.pAD) },
@@ -471,7 +459,6 @@ export function renderESStats(result, engine, showFDR) {
 export function drawNESChart(results, container) {
   if (!results || results.length === 0) return;
 
-  // Sort: positive NES descending on top, negative below
   const sorted = [...results].sort((a, b) => b.nes - a.nes);
 
   const barH  = 20;
@@ -480,13 +467,12 @@ export function drawNESChart(results, container) {
   const padB  = 28;
   const padL  = 8;
   const padR  = 12;
-  const valW  = 56;   // reserved for NES value label
+  const valW  = 56;
 
   const nBars  = sorted.length;
   const totalH = padT + nBars * (barH + gap) + padB;
 
   const W      = Math.max(container.clientWidth || 700, 500);
-  // Issue (3): label area = 38% of width, capped at 240px
   const labelW = Math.min(Math.floor(W * 0.38), 240);
   const chartW = W - padL - labelW - valW - padR;
 
@@ -504,12 +490,10 @@ export function drawNESChart(results, container) {
     const fill   = isPos ? '#1c6e41' : '#b01c1c';
     const fillBg = isPos ? 'rgba(28,110,65,.08)' : 'rgba(176,28,28,.07)';
 
-    // Significance stars based on pCauchy
     const star = r.pCauchy < 0.001 ? ' ***'
                : r.pCauchy < 0.01  ? ' **'
                : r.pCauchy < 0.05  ? ' *' : '';
 
-    // Issue (3): truncate long names; full name in SVG <title> for tooltip
     const label    = _truncate(r.name, 32);
     const nesStr   = nes.toFixed(2) + star;
     const valX     = isPos ? zeroX + barPx + 4 : zeroX - barPx - 4;
@@ -534,7 +518,6 @@ export function drawNESChart(results, container) {
       </text>`;
   }).join('');
 
-  // Issue (3): zero line only, no tick marks
   const zeroLine = `
     <line x1="${_f(zeroX)}" y1="${padT - 4}"
           x2="${_f(zeroX)}" y2="${padT + nBars * (barH + gap)}"
@@ -566,7 +549,6 @@ function _svgToPNGAsync(svgEl, filename) {
   return new Promise((resolve, reject) => {
     const clone = svgEl.cloneNode(true);
 
-    // Embed minimal font fallbacks so PNG is self-contained
     const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
     style.textContent = `
       text { font-family: 'Inter', Arial, sans-serif; }`;
