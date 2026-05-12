@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  iGSEA v2.3 application entry
+//  main.js  ·  iGSEA v2.4
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -17,41 +17,39 @@ import {
   setRunEnabled, downloadCSV, generateDemo
 }                           from './ui/controls.js';
 
-// ── State ────────────────────────────────────────────────────
 const S = {
-  exprMat:      null,
-  geneNames:    [],
-  sampleNames:  [],
-  rawPathways:  [],
-  pathwayList:  [],
-  results:      null,
-  engine:       'parametric',
-  running:      false,
-  showFDR:      false,
-  abortCtrl:    null    // AbortController for current run
+  exprMat:     null,
+  geneNames:   [],
+  sampleNames: [],
+  rawPathways: [],
+  pathwayList: [],
+  results:     null,
+  engine:      'parametric',
+  running:     false,
+  showFDR:     false,
+  abortCtrl:   null
 };
 
-// ── jStat status ─────────────────────────────────────────────
+// ── jStat check ──────────────────────────────────────────────
 function checkJStat() {
+  const badge = document.getElementById('jstat-status');
   if (typeof jStat !== 'undefined') {
-    log('jStat loaded — parametric engine available', 'ok');
-    document.getElementById('jstat-status').textContent = 'jStat ✓';
-    document.getElementById('jstat-status').className   = 'jstat-badge ok';
+    log('jStat ready — parametric engine (Γ + GΓ) available', 'ok');
+    badge.textContent = 'jStat ✓';
+    badge.className   = 'jstat-badge ok';
   } else {
-    log('jStat not available — parametric engine disabled', 'warn');
-    document.getElementById('jstat-status').textContent = 'jStat ✗';
-    document.getElementById('jstat-status').className   = 'jstat-badge err';
-    // Disable parametric option
+    log('jStat unavailable — parametric engine disabled', 'warn');
+    badge.textContent = 'jStat ✗';
+    badge.className   = 'jstat-badge err';
     const opt = document.querySelector('#sel-engine option[value="parametric"]');
     if (opt) opt.disabled = true;
     document.getElementById('sel-engine').value = 'permutation';
     S.engine = 'permutation';
   }
 }
-// jStat loads via <script> tag before this module; check after a tick
 setTimeout(checkJStat, 100);
 
-// ── UI setup ─────────────────────────────────────────────────
+// ── UI ───────────────────────────────────────────────────────
 setupModeTabs();
 
 document.getElementById('sel-engine').addEventListener('change', e => {
@@ -60,42 +58,45 @@ document.getElementById('sel-engine').addEventListener('change', e => {
 document.getElementById('chk-extra').addEventListener('change', e => {
   document.getElementById('rt').classList.toggle('show-ext', e.target.checked);
 });
+document.getElementById('btn-reset-zoom')?.addEventListener('click', () => {
+  resetZoom();
+});
 
-// ── Clear results ─────────────────────────────────────────────
+// ── Clear ─────────────────────────────────────────────────────
 document.getElementById('btn-clear').addEventListener('click', () => {
   if (S.running) return;
   S.results = null;
   S.showFDR = false;
-  document.getElementById('res-panel').style.display   = 'none';
-  document.getElementById('empty-state').style.display = 'flex';
-  document.getElementById('tbody').innerHTML = '';
+  document.getElementById('res-panel').style.display    = 'none';
+  document.getElementById('empty-state').style.display  = 'flex';
   document.getElementById('plot-section').style.display = 'none';
   document.getElementById('prog-wrap').style.display    = 'none';
+  document.getElementById('fdr-note').style.display     = 'none';
+  document.getElementById('tbody').innerHTML = '';
   log('Results cleared', 'ok');
 });
 
-// ── Abort ────────────────────────────────────────────────────
+// ── Abort ─────────────────────────────────────────────────────
 document.getElementById('btn-abort').addEventListener('click', () => {
   if (!S.running || !S.abortCtrl) return;
   S.abortCtrl.abort();
-  log('Abort requested — stopping after current chunk…', 'warn');
   document.getElementById('btn-abort').disabled = true;
+  log('Abort requested…', 'warn');
 });
 
-// ── File drops ───────────────────────────────────────────────
+// ── File drops ────────────────────────────────────────────────
 setupDropZone('dz-expr', 'fi-expr', _loadExpr);
 setupDropZone('dz-path', 'fi-path', _loadPath);
 
 function _loadExpr(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
+  const r = new FileReader();
+  r.onload = e => {
     try {
       const { gNames, sNames, mat, maxRaw, transformed } = parseExpr(e.target.result);
       S.geneNames   = gNames;
       S.sampleNames = sNames;
       S.exprMat     = mat;
-      const note = transformed
-        ? ` · log₂+1 (rawMax=${maxRaw.toFixed(0)})` : '';
+      const note = transformed ? ` · log₂+1 (rawMax=${maxRaw.toFixed(0)})` : '';
       setFileLoaded('expr', file.name,
         `${gNames.length} genes × ${sNames.length} samples${note}`);
       log(`Expression: ${gNames.length}×${sNames.length}${note}`, 'ok');
@@ -106,33 +107,29 @@ function _loadExpr(file) {
       _updateRun();
     } catch (err) { log(`Expression error: ${err.message}`, 'err'); }
   };
-  reader.readAsText(file);
+  r.readAsText(file);
 }
 
 function _loadPath(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
+  const r = new FileReader();
+  r.onload = e => {
     try {
       const txt   = e.target.result;
       const first = txt.split('\n')[0] || '';
       if ((first.match(/\t/g) ?? []).length < 2)
-        throw new Error(
-          'File does not appear to be GMT format.\n' +
-          'Expected: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩gene2…'
-        );
+        throw new Error('Not GMT format. Expected: name⟨tab⟩url⟨tab⟩gene1⟨tab⟩…');
       const rp = parseGMT(txt);
       S.rawPathways = rp;
-      log(`Gene sets: ${rp.length} loaded from ${file.name}`, 'ok');
+      log(`Gene sets: ${rp.length} loaded`, 'ok');
       _rebuildMasks();
-      const nV = S.pathwayList.length;
       setFileLoaded('path', file.name,
         S.geneNames.length > 0
-          ? `${nV} / ${rp.length} sets (≥10 matched genes)`
+          ? `${S.pathwayList.length} / ${rp.length} sets (≥10 matched genes)`
           : `${rp.length} sets — load expression to match`);
       _updateRun();
     } catch (err) { log(`Gene sets: ${err.message}`, 'err'); }
   };
-  reader.readAsText(file);
+  r.readAsText(file);
 }
 
 function _rebuildMasks() {
@@ -148,7 +145,7 @@ function _updateRun() {
   document.getElementById('btn-clear').disabled = S.running;
 }
 
-// ── Run iGSEA ────────────────────────────────────────────────
+// ── Run iGSEA ─────────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click', async () => {
   if (S.running) return;
 
@@ -157,6 +154,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
   const nCase  = +document.getElementById('n-case').value;
   const nPerms = Math.min(+document.getElementById('n-perms').value, 2000);
+  const wt     = Math.max(0, +document.getElementById('weight-p').value);
   S.engine   = document.getElementById('sel-engine').value;
   S.running  = true;
   S.abortCtrl = new AbortController();
@@ -164,7 +162,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   _updateRun();
   showProgress(true);
   setProgress(0, 'Starting', 'Initialising iGSEA…');
-  log(`iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · engine=${S.engine}`, 'ok');
+  log(`iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · p=${wt} · engine=${S.engine}`, 'ok');
 
   const t0 = performance.now();
   try {
@@ -174,6 +172,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
       pathways:     paths,
       nCase,
       nPerms,
+      weightP:      wt,
       engine:       S.engine,
       abortSignal:  S.abortCtrl.signal,
       onProgress:   setProgress
@@ -181,7 +180,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
     setProgress(100, 'Done', `iGSEA complete in ${sec}s`);
-    log(`iGSEA done: ${results.length} pathway(s) in ${sec}s`, 'ok');
+    log(`Done: ${results.length} pathway(s) in ${sec}s`, 'ok');
 
     S.results = results;
     S.showFDR = results.length > 10;
@@ -189,8 +188,8 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
   } catch (err) {
     if (err.message === 'Aborted') {
-      log('iGSEA aborted by user', 'warn');
-      setProgress(0, 'Aborted', 'Analysis was stopped. Press Run iGSEA to restart.');
+      log('Aborted by user', 'warn');
+      setProgress(0, 'Aborted', 'Stopped. Press Run iGSEA to restart.');
     } else {
       log(`Error: ${err.message}`, 'err');
       setProgress(0, 'Error', err.message);
@@ -202,7 +201,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   _updateRun();
 });
 
-// ── Demo ─────────────────────────────────────────────────────
+// ── Demo ──────────────────────────────────────────────────────
 document.getElementById('btn-demo').addEventListener('click', () => {
   if (S.running) return;
   const d = generateDemo();
@@ -223,12 +222,11 @@ document.getElementById('btn-demo').addEventListener('click', () => {
   log(`Demo: ${d.gNames.length}×${d.sNames.length}, ${d.pathwayList.length} pathways`, 'ok');
 });
 
-// ── Export ────────────────────────────────────────────────────
 document.getElementById('btn-dl').addEventListener('click', () => {
   downloadCSV(S.results, S.engine);
 });
 
-// ── Render results ────────────────────────────────────────────
+// ── Render results ─────────────────────────────────────────────
 function _renderResults(results) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('res-panel').style.display   = 'block';
@@ -236,8 +234,12 @@ function _renderResults(results) {
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
   document.getElementById('res-engine-badge').textContent =
     S.engine === 'parametric'
-      ? 'Parametric Approximation (Γ + GΓ via jStat)'
+      ? 'Parametric (Γ + GΓ via jStat)'
       : 'Permutation';
+
+  // Show FDR explanatory note when FDR column is active
+  document.getElementById('fdr-note').style.display =
+    S.showFDR ? 'block' : 'none';
 
   renderTable(results, S.showFDR, S.engine, _selectPathway);
 }
@@ -249,7 +251,7 @@ function _selectPathway(result) {
   renderESStats(result, S.engine, S.showFDR);
 }
 
-// ── Resize ───────────────────────────────────────────────────
+// ── Resize ────────────────────────────────────────────────────
 let _rt;
 window.addEventListener('resize', () => {
   clearTimeout(_rt);
@@ -263,4 +265,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-log('iGSEA v2.3 ready — load files or click ⚡ Demo', 'ok');
+log('iGSEA v2.4 ready — load files or click ⚡ Demo', 'ok');
