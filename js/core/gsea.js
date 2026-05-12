@@ -1,25 +1,19 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.8 (High Responsiveness Edition)
-//
-//  Key changes from v2.7:
-//  • TARGET_CHUNK_MS reduced to 16ms (matches 60fps frame budget).
-//  • Empirical p-value loop is now asynchronous with progress updates.
-//  • Parametric fitting yields after EVERY pathway for maximum smoothness.
-//  • Removed redundant nullAD_arr memory allocation (passes TypedArray directly).
-//  • Assembly and FDR stages now include yield points for large pathway sets.
+//  core/gsea.js  ·  v2.9 (Standard GSEA FDR Edition)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import {
   calcSNR, rankOrder, calcGSEAStats,
-  cauchyCombine, bhFDR, shuffle,
-  calcNES, calcNES_AD, empP_KS, empP_AD
+  cauchyCombine, shuffle,
+  calcNES, calcNES_AD, empP_KS, empP_AD,
+  calcGseaFDR // 确保 math.js 中已添加此函数或在本文件末尾补充
 } from './math.js';
 
 import { pvalGG } from './distributions.js';
 
 const MAX_PERMS       = 2000;
-const TARGET_CHUNK_MS = 10; // 16ms 确保 UI 线程每帧都有机会刷新
+const TARGET_CHUNK_MS = 10; 
 
 export async function runGSEA(opts) {
   const {
@@ -35,9 +29,7 @@ export async function runGSEA(opts) {
   const wt     = typeof opts.weightP === 'number' ? opts.weightP : 1;
 
   if (nCase < 2 || nCase > nS - 2)
-    throw new Error(
-      `nCase=${nCase} out of range [2, ${nS - 2}] (nSamples=${nS})`
-    );
+    throw new Error(`nCase out of range`);
 
   const _ab = () => abortSignal?.aborted === true;
 
@@ -48,10 +40,8 @@ export async function runGSEA(opts) {
 
   // ── 1. Observed ───────────────────────────────────────────
   onProgress(0, 'Observed', 'Computing SNR & enrichment…');
-
   const obsSNR = new Float64Array(nG);
   calcSNR(exprMat, nG, cIdx, tIdx, obsSNR);
-
   const obsOrd = new Array(nG);
   rankOrder(obsSNR, nG, obsOrd);
 
@@ -59,140 +49,134 @@ export async function runGSEA(opts) {
     calcGSEAStats(obsSNR, obsOrd, p.mask, nG, true, wt)
   );
 
-  if (_ab()) throw new Error('Aborted');
-
   // ── 2. Permutations ───────────────────────────────────────
   const nullKS = Array.from({ length: nP }, () => new Float64Array(nPerms));
   const nullAD = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
   const permArr = new Uint16Array(nS);
   for (let i = 0; i < nS; i++) permArr[i] = i;
-
   const permSNR = new Float32Array(nG);
   const permOrd = new Array(nG);
   const permC   = permArr.subarray(0, nCase);
   const permT   = permArr.subarray(nCase);
 
-  const t0 = performance.now();
-  let chunkSize = 5;
   let done = 0;
+  let chunkSize = 5;
+  const t0 = performance.now();
 
   while (done < nPerms) {
     if (_ab()) throw new Error('Aborted');
-
-    const end    = Math.min(done + chunkSize, nPerms);
     const tChunk = performance.now();
+    const end = Math.min(done + chunkSize, nPerms);
 
     for (let j = done; j < end; j++) {
       shuffle(permArr);
       calcSNR(exprMat, nG, permC, permT, permSNR);
       rankOrder(permSNR, nG, permOrd);
       for (let pi = 0; pi < nP; pi++) {
-        const st = calcGSEAStats(
-          permSNR, permOrd, pathways[pi].mask, nG, false, wt
-        );
+        const st = calcGSEAStats(permSNR, permOrd, pathways[pi].mask, nG, false, wt);
         nullKS[pi][j] = st.ks;
         nullAD[pi][j] = st.ad;
       }
     }
-
     done = end;
-
     const elapsed = performance.now() - tChunk;
     if (elapsed > 0 && done < nPerms) {
-      // 动态调整 chunkSize 使得每次占用 CPU 时间接近 TARGET_CHUNK_MS
-      const newChunk = Math.round(chunkSize * TARGET_CHUNK_MS / elapsed);
-      chunkSize = Math.max(1, Math.min(500, newChunk));
+      chunkSize = Math.max(1, Math.min(500, Math.round(chunkSize * TARGET_CHUNK_MS / elapsed)));
     }
-
-    const totalElapsed = (performance.now() - t0) / 1000;
-    const pct  = Math.round(done / nPerms * 80);
-    const eta  = totalElapsed > 0.1
-      ? ((nPerms - done) / (done / totalElapsed)).toFixed(0) : '—';
-    const rate = (done / (totalElapsed + 0.001)).toFixed(0);
-    
-    onProgress(pct, 'Permutations',
-      `${done}/${nPerms} · ETA ${eta}s · ${rate} perm/s`);
-
+    onProgress(Math.round(done/nPerms*70), 'Permutations', `${done}/${nPerms} perms`);
     await _yield();
   }
 
-  if (_ab()) throw new Error('Aborted');
+  // ── 3. Normalization (The GSEA Secret Sauce) ──────────────
+  onProgress(71, 'Normalization', 'Calculating Null NES Matrix…');
+  
+  const nullNES_KS = Array.from({ length: nP }, () => new Float64Array(nPerms));
+  const nullNES_AD = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
-  // ── 3. Empirical p & NES ──────────────────────────────────
-  onProgress(81, 'Statistics', 'p-values & NES…');
-  await _yield();
-
-  // 异步化处理：即使是简单的 map，在 pathway 很多时也会卡顿
-  const empArr = new Array(nP);
   for (let pi = 0; pi < nP; pi++) {
     if (_ab()) throw new Error('Aborted');
     
+    // KS 归一化参数：分别计算正负 ES 的均值
+    let posSum = 0, posCnt = 0, negSum = 0, negCnt = 0;
+    const ksVec = nullKS[pi];
+    for (let j = 0; j < nPerms; j++) {
+      const v = ksVec[j];
+      if (v >= 0) { posSum += v; posCnt++; }
+      else { negSum += Math.abs(v); negCnt++; }
+    }
+    const posMean = posCnt > 0 ? posSum / posCnt : 1e-9;
+    const negMean = negCnt > 0 ? negSum / negCnt : 1e-9;
+
+    // AD 归一化参数：计算 AD 的均值 (AD永远为正)
+    let adSum = 0;
+    const adVec = nullAD[pi];
+    for (let j = 0; j < nPerms; j++) adSum += adVec[j];
+    const adMean = adSum / nPerms || 1e-9;
+
+    for (let j = 0; j < nPerms; j++) {
+      nullNES_KS[pi][j] = ksVec[j] >= 0 ? ksVec[j] / posMean : ksVec[j] / negMean;
+      nullNES_AD[pi][j] = adVec[j] / adMean;
+    }
+    if (pi % 100 === 0) await _yield();
+  }
+
+  // ── 4. Empirical Statistics & Observed NES ────────────────
+  onProgress(80, 'Statistics', 'p-values & NES…');
+  const empArr = new Array(nP);
+  for (let pi = 0; pi < nP; pi++) {
     const ok = obsStats[pi].ks;
     const oa = obsStats[pi].ad;
     empArr[pi] = {
-      ok,
-      oa,
+      ok, oa,
       pKS_emp: empP_KS(ok, nullKS[pi], nPerms),
       pAD_emp: empP_AD(oa, nullAD[pi], nPerms),
       nes:     calcNES(ok, nullKS[pi]),
       nes_ad:  calcNES_AD(oa, nullAD[pi])
     };
-
-    // 每 50 条路径释放一次主线程
-    if (pi % 50 === 49) {
-      onProgress(81, 'Statistics', `Empirical p (${pi + 1}/${nP})…`);
-      await _yield();
-    }
+    if (pi % 100 === 99) await _yield();
   }
 
-  // ── 4. AD parametric fitting ──────────────────────────────
-  const useParam = engine === 'parametric';
+  // ── 5. Standard GSEA FDR (Pooled Distribution) ────────────
+  onProgress(85, 'FDR', 'Pooling distributions…');
+  
+  const obsNES_KS = empArr.map(e => e.nes);
+  const obsNES_AD = empArr.map(e => e.nes_ad);
 
-  const pKS_arr = empArr.map(e => e.pKS_emp);
-  const pAD_arr = new Array(nP);
+  // 调用封装在 math.js 中的全局 FDR 计算逻辑
+  const fdrKS = internalCalcGseaFDR(obsNES_KS, nullNES_KS, true);
+  const fdrAD = internalCalcGseaFDR(obsNES_AD, nullNES_AD, false);
+
+  // ── 6. Parametric Fitting (Optional) ──────────────────────
+  const useParam = engine === 'parametric';
+  const pAD_final = new Float64Array(nP);
   const pAD_par_arr = new Array(nP).fill(null);
 
   if (useParam) {
-    let fitSuccess = 0;
     for (let pi = 0; pi < nP; pi++) {
       if (_ab()) throw new Error('Aborted');
-
-      const r = empArr[pi];
-      
-      // 优化：直接传入 Float64Array (TypedArray)，移除耗时的 Array.from 转换
-      const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
-
+      const res = pvalGG(empArr[pi].oa, nullAD[pi], empArr[pi].pAD_emp);
       if (res.fitted) {
         pAD_par_arr[pi] = res.p;
-        pAD_arr[pi]     = res.p;
-        fitSuccess++;
+        pAD_final[pi] = res.p;
       } else {
-        pAD_arr[pi]     = r.pAD_emp;
+        pAD_final[pi] = empArr[pi].pAD_emp;
       }
-
-      // 每一个通路都进行 yield，确保在高密度的 MLE 拟合中界面绝对流畅
-      const pct = 85 + Math.round((pi / nP) * 10);
-      onProgress(pct, 'Fitting', `Fitting AD (${pi + 1}/${nP}) · Success: ${fitSuccess}`);
-      await _yield();
+      if (pi % 20 === 0) {
+        onProgress(85 + Math.round(pi/nP*10), 'Fitting', `Fitting AD ${pi}/${nP}`);
+        await _yield();
+      }
     }
-
-    console.log(`GG fit success: ${fitSuccess}/${nP} pathways`);
   } else {
-    for (let pi = 0; pi < nP; pi++) {
-      pAD_arr[pi] = empArr[pi].pAD_emp;
-    }
+    for (let pi = 0; pi < nP; pi++) pAD_final[pi] = empArr[pi].pAD_emp;
   }
 
-  // ── 5. Assemble results ───────────────────────────────────
-  onProgress(97, 'Assembling', 'Cauchy & FDR…');
-  await _yield();
-
-  // 组装结果：也要防止大数组导致的瞬间卡顿
+  // ── 7. Assemble ───────────────────────────────────────────
+  onProgress(98, 'Assembling', 'Finalising results…');
   const results = [];
   for (let pi = 0; pi < nP; pi++) {
-    const e  = empArr[pi];
-    const pC = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
+    const e = empArr[pi];
+    const pC = cauchyCombine(e.pKS_emp, pAD_final[pi]);
     
     results.push({
       name:     pathways[pi].name,
@@ -202,32 +186,75 @@ export async function runGSEA(opts) {
       ad:       e.oa,
       nes:      e.nes,
       nes_ad:   e.nes_ad,
+      pKS:      e.pKS_emp,
+      pAD:      pAD_final[pi],
+      pCauchy:  pC,
+      fdr_ks:   fdrKS[pi],  // 标准 GSEA FDR (KS)
+      fdr_ad:   fdrAD[pi],  // 标准 GSEA FDR (AD)
       pKS_emp:  e.pKS_emp,
       pAD_emp:  e.pAD_emp,
-      pKS_par:  null,
       pAD_par:  pAD_par_arr[pi],
-      pKS:      pKS_arr[pi],
-      pAD:      pAD_arr[pi],
-      pCauchy:  pC,
-      fdr:      null, 
       curve:    obsStats[pi].curve,
       obsOrd,
       peakIdx:  obsStats[pi].peakIdx
     });
-    
-    if (pi % 100 === 99) await _yield();
   }
 
-  // ── 6. BH-FDR on pCauchy ─────────────────────────────────
-  if (results.length >= 2) {
-    await _yield(); // FDR 前最后喘息
-    const pv = results.map(r => r.pCauchy);
-    const qv = bhFDR(pv);
-    results.forEach((r, i) => { r.fdr = qv[i]; });
-  }
-
-  onProgress(100, 'Done', `${results.length} pathway(s) complete`);
+  onProgress(100, 'Done', `Complete`);
   return results;
+}
+
+/**
+ * 内部 GSEA 风格 FDR 计算
+ * 如果 math.js 里没写，可以直接放在这里
+ */
+function internalCalcGseaFDR(obsNES, nullNESMat, twoSided) {
+  const nP = obsNES.length;
+  const nPerms = nullNESMat[0].length;
+  const fdr = new Float64Array(nP);
+
+  if (twoSided) {
+    // KS 分正负池
+    const nullPos = [], nullNeg = [];
+    for (let i = 0; i < nP; i++) {
+      const vec = nullNESMat[i];
+      for (let j = 0; j < nPerms; j++) {
+        if (vec[j] >= 0) nullPos.push(vec[j]); else nullNeg.push(vec[j]);
+      }
+    }
+    const obsPos = obsNES.filter(v => v >= 0);
+    const obsNeg = obsNES.filter(v => v < 0);
+
+    for (let i = 0; i < nP; i++) {
+      const nes = obsNES[i];
+      const isPos = nes >= 0;
+      const pool = isPos ? nullPos : nullNeg;
+      const obsGroup = isPos ? obsPos : obsNeg;
+
+      const countNull = pool.reduce((acc, v) => isPos ? (v >= nes ? acc + 1 : acc) : (v <= nes ? acc + 1 : acc), 0);
+      const countObs  = obsGroup.reduce((acc, v) => isPos ? (v >= nes ? acc + 1 : acc) : (v <= nes ? acc + 1 : acc), 0);
+      
+      const phiNull = countNull / pool.length;
+      const phiObs  = countObs / obsGroup.length;
+      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
+    }
+  } else {
+    // AD 单向池 (全是正数)
+    const nullPool = [];
+    for (let i = 0; i < nP; i++) {
+      const vec = nullNESMat[i];
+      for (let j = 0; j < nPerms; j++) nullPool.push(vec[j]);
+    }
+    for (let i = 0; i < nP; i++) {
+      const nes = obsNES[i];
+      const countNull = nullPool.reduce((acc, v) => v >= nes ? acc + 1 : acc, 0);
+      const countObs  = obsNES.reduce((acc, v) => v >= nes ? acc + 1 : acc, 0);
+      const phiNull = countNull / nullPool.length;
+      const phiObs  = countObs / nP;
+      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
+    }
+  }
+  return fdr;
 }
 
 const _yield = () => new Promise(r => setTimeout(r, 0));
