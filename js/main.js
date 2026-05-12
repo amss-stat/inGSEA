@@ -33,7 +33,30 @@ const S = {
 };
 
 // ── jStat check ──────────────────────────────────────────────
-
+// ── main.js 中的修改 ──────────────────────────────────────────────
+function checkJStat() {
+  const badge = document.getElementById('jstat-status');
+  if (typeof jStat !== 'undefined') {
+    log('jStat (Local) ready', 'ok');
+    if (badge) {
+      badge.textContent = 'jStat ✓';
+      badge.className   = 'jstat-badge ok';
+    }
+  } else {
+    log('jStat failed to load locally — check file path', 'err');
+    if (badge) {
+      badge.textContent = 'jStat ✗';
+      badge.className   = 'jstat-badge err';
+    }
+    const opt = document.querySelector('#sel-engine option[value="parametric"]');
+    if (opt) opt.disabled = true;
+    document.getElementById('sel-engine').value = 'permutation';
+    S.engine = 'permutation';
+  }
+}
+// 脚本一旦执行，本地的 jstat.min.js 肯定已经加载完毕（因为 script 标签阻塞特性）
+// 直接同步调用即可：
+checkJStat();
 
 
 // ── Mode tabs ─────────────────────────────────────────────────
