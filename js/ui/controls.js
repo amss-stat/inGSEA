@@ -105,7 +105,7 @@ export function downloadCSV(results, engine) {
     'pAD',                          // combined (par if available, else perm)
     ...(isP ? ['pAD_par'] : []),    // parametric AD only when engine=parametric
     'pAD_perm',                     // always empirical AD
-    'pCauchy', 'FDR'
+    'pCauchy', 'q_Storey'
   ];
 
   const fp = v =>
