@@ -49,7 +49,7 @@ function checkJStat() {
     S.engine = 'permutation';
   }
 }
-setTimeout(checkJStat, 100);
+
 
 // ── Mode tabs ─────────────────────────────────────────────────
 setupModeTabs();
