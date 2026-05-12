@@ -31,7 +31,8 @@
   </div>
   <nav class="hdr-nav">
     <span class="jstat-badge" id="jstat-status">jStat…</span>
-    <span class="browser-note" title="Chrome provides significantly faster JS engine performance for iGSEA">
+    <span class="browser-note"
+          title="Chrome provides significantly faster JS engine performance for iGSEA">
       🌐 Chrome recommended
     </span>
     <a href="https://github.com/amss-stat/iGSEA-DEMO"
@@ -49,7 +50,7 @@
       <div class="dz-icon">📊</div>
       <div class="dz-hint">
         Drop CSV, TSV, or TXT here<br>
-        <span class="hint-sub">rows = genes  cols = samples</span>
+        <span class="hint-sub">rows = genes &nbsp; cols = samples</span>
       </div>
       <div class="dz-name"  id="fn-expr"></div>
       <div class="dz-stats" id="st-expr"></div>
@@ -62,7 +63,7 @@
       <input type="file" id="fi-path" accept=".gmt,.txt">
       <div class="dz-icon">🧬</div>
       <div class="dz-hint">
-        Drop MSigDB GMT or TXT here<br>
+        Drop MSigDB GMT or TXT here
       </div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
@@ -116,7 +117,7 @@
       <div id="sel-multi-wrap" style="display:none;margin-top:6px">
         <select class="fi" id="sel-multi" multiple size="5"></select>
         <div class="hint-sub" style="margin-top:3px">
-          Ctrl & click to select multiple
+          Ctrl &amp; click to select multiple
         </div>
       </div>
     </div>
@@ -194,13 +195,16 @@
     <div class="res-toolbar">
       <div class="res-toolbar-left">
         <span class="res-count" id="res-count"></span>
-        <span class="res-engine-badge" id="res-engine-badge"></span>
       </div>
       <div class="res-toolbar-right">
         <label class="toggle-lbl">
           <input type="checkbox" id="chk-extra"> Extended columns
         </label>
         <button class="btn-secondary btn-sm" id="btn-dl">⬇ Export CSV</button>
+        <button class="btn-secondary btn-sm" id="btn-export-curves"
+                title="Export all enrichment score curves as PNG images">
+          🖼 Export curves
+        </button>
       </div>
     </div>
 
@@ -218,20 +222,41 @@
       </table>
     </div>
 
+    <!-- NES bar chart (shown when > 10 pathways) -->
+    <div class="nes-chart-section" id="nes-chart-section" style="display:none">
+      <div class="plot-toolbar">
+        <div class="plot-title-group">
+          <span class="plot-lbl">NES Overview</span>
+          <span class="plot-name" style="font-size:12px;color:var(--muted)">
+            Normalized Enrichment Score (all pathways)
+          </span>
+        </div>
+        <div class="plot-controls">
+          <button class="btn-secondary btn-sm" id="btn-dl-nes"
+                  title="Download NES bar chart as PNG">⬇ PNG</button>
+        </div>
+      </div>
+      <div id="nes-chart-wrap" class="svg-wrap"></div>
+    </div>
+
     <div class="plot-section" id="plot-section" style="display:none">
       <div class="plot-toolbar">
         <div class="plot-title-group">
           <span class="plot-lbl">Enrichment Score Walk</span>
           <span class="plot-name" id="plot-name">—</span>
           <a class="plot-db-link" id="plot-db-link"
-             href="#" target="_blank" rel="noopener" style="display:none">
+             href="#" target="_blank" rel="noopener"
+             title="Jump to pathway database information"
+             style="display:none">
             ↗ MSigDB
           </a>
         </div>
         <div class="plot-controls">
           <button class="btn-secondary btn-sm" id="btn-reset-zoom"
                   title="Reset zoom to full view">⊡ Reset zoom</button>
-          <span class="plot-hint">📈 row · scroll/drag to zoom &amp; pan · dbl-click reset</span>
+          <button class="btn-secondary btn-sm" id="btn-dl-curve"
+                  title="Download this enrichment curve as PNG">⬇ PNG</button>
+          <span class="plot-hint">scroll/drag to zoom &amp; pan · dbl-click reset</span>
         </div>
       </div>
       <div class="svg-wrap" id="svg-wrap"></div>
@@ -240,15 +265,36 @@
 
   </div>
 
+  <!-- References -->
   <div id="ref-section" class="ref-section">
     <div class="sec-lbl" style="padding:0 0 8px 0">References &amp; Resources</div>
     <ol class="ref-list">
       <li>
+        <em>[Our paper — citation to be added upon publication]</em>
+      </li>
+      <li>
+        Lin J, <em>et al.</em> (2002).
+        Transcriptional co-activator PGC-1α drives the formation of slow-twitch
+        muscle fibres.
+        <em>Nature</em>, 418, 797–801.
+        <a href="https://doi.org/10.1038/nature00904"
+           target="_blank" rel="noopener">doi:10.1038/nature00904</a>
+      </li>
+      <li>
         Subramanian A, <em>et al.</em> (2005).
-        Gene set enrichment analysis: a knowledge-based approach.
+        Gene set enrichment analysis: a knowledge-based approach for interpreting
+        genome-wide expression profiles.
         <em>PNAS</em>, 102(43), 15545–15550.
         <a href="https://doi.org/10.1073/pnas.0506580102"
            target="_blank" rel="noopener">doi:10.1073/pnas.0506580102</a>
+      </li>
+      <li>
+        Liberzon A, Subramanian A, Pinchback R, Thorvaldsdóttir H,
+        Tamayo P &amp; Mesirov JP (2011).
+        Molecular Signatures Database (MSigDB) 3.0.
+        <em>Bioinformatics</em>, 27(12), 1739–1740.
+        <a href="https://doi.org/10.1093/bioinformatics/btr260"
+           target="_blank" rel="noopener">doi:10.1093/bioinformatics/btr260</a>
       </li>
       <li>
         Liberzon A, <em>et al.</em> (2015).
@@ -257,12 +303,14 @@
         <a href="https://doi.org/10.1016/j.cels.2015.12.004"
            target="_blank" rel="noopener">doi:10.1016/j.cels.2015.12.004</a>
       </li>
-      <li class="ref-placeholder"></li>
     </ol>
     <p class="ref-note">
       GMT files:
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
          target="_blank" rel="noopener">MSigDB Collections</a>
+      · MSigDB data is available for academic non-commercial use under the
+      <a href="https://www.gsea-msigdb.org/gsea/msigdb/license_agreement.jsp"
+         target="_blank" rel="noopener">MSigDB license</a>.
     </p>
   </div>
 
