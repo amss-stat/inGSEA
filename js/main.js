@@ -33,22 +33,7 @@ const S = {
 };
 
 // ── jStat check ──────────────────────────────────────────────
-function checkJStat() {
-  const badge = document.getElementById('jstat-status');
-  if (typeof jStat !== 'undefined') {
-    log('jStat ready', 'ok');
-    badge.textContent = 'jStat ✓';
-    badge.className   = 'jstat-badge ok';
-  } else {
-    log('jStat unavailable — switching to permutation engine', 'warn');
-    badge.textContent = 'jStat ✗';
-    badge.className   = 'jstat-badge err';
-    const opt = document.querySelector('#sel-engine option[value="parametric"]');
-    if (opt) opt.disabled = true;
-    document.getElementById('sel-engine').value = 'permutation';
-    S.engine = 'permutation';
-  }
-}
+
 
 
 // ── Mode tabs ─────────────────────────────────────────────────
