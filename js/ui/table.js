@@ -1,11 +1,10 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  v2.6
-//  Fixes:
-//  • FDR col always rendered (col-ext); fp() never receives null
-//    when results.length >= 2 (gsea.js now always sets fdr)
-//  • showFDR flag controls FDR note in main.js only;
-//    table always has the column available in extended view
-//  • pKS_par / pAD_par shown in extended columns when available
+//  ui/table.js  ·  v2.7
+//  Changes from v2.6:
+//  • pKS header: always "pKS (perm)" — no parametric variant
+//  • pAD header: "pAD (par)" when engine=parametric, else "pAD"
+//  • Removed pKS_par from extended columns (always null)
+//  • Added pAD_emp to extended columns (always shown when extended)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -26,7 +25,6 @@ const COLS = [
   { id:'ad',       hdr:'AD',                           extra:true,  sort:true  },
   { id:'pKS_emp',  hdr:'p<sub>KS</sub>&nbsp;(perm)',   extra:true,  sort:true  },
   { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
-  { id:'pKS_par',  hdr:'p<sub>KS</sub>&nbsp;(par)',    extra:true,  sort:true  },
   { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
 ];
 
@@ -42,10 +40,10 @@ export function renderTable(results, showFDR, engine, onSelect) {
 // ── Head ──────────────────────────────────────────────────────
 function _buildHead(engine) {
   const isPar = engine === 'parametric';
+  // KS is always permutation-based
+  // AD primary column reflects the engine choice
   const over  = {
-    pKS: isPar
-      ? 'p<sub>KS</sub>&thinsp;<small>(par)</small>'
-      : 'p<sub>KS</sub>',
+    pKS: 'p<sub>KS</sub>&thinsp;<small>(perm)</small>',
     pAD: isPar
       ? 'p<sub>AD</sub>&thinsp;<small>(par)</small>'
       : 'p<sub>AD</sub>',
@@ -123,7 +121,6 @@ function _cell(id, r, rank, url) {
     case 'nes':
       return `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`;
 
-    // Issue (5): NES-AD always neutral
     case 'nes_ad':
       return `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`;
 
@@ -152,9 +149,6 @@ function _cell(id, r, rank, url) {
 
     case 'pAD_emp':
       return `<td class="pv col-ext ${pc(r.pAD_emp)}">${fp(r.pAD_emp)}</td>`;
-
-    case 'pKS_par':
-      return `<td class="pv col-ext ${pc(r.pKS_par)}">${fp(r.pKS_par)}</td>`;
 
     case 'pAD_par':
       return `<td class="pv col-ext ${pc(r.pAD_par)}">${fp(r.pAD_par)}</td>`;
@@ -193,7 +187,6 @@ function _sorted(results) {
     ad:      r => r.ad,
     pKS_emp: r => r.pKS_emp,
     pAD_emp: r => r.pAD_emp,
-    pKS_par: r => r.pKS_par ?? 1,
     pAD_par: r => r.pAD_par ?? 1,
   }[_sortCol] ?? (r => r.pCauchy);
 
