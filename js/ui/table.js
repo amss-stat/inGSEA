@@ -1,32 +1,29 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  v2.9 (Standard GSEA FDR Edition)
+//  ui/table.js  ·  v2.9 (GSEA standard FDR Edition)
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import { msigdbUrl } from './fileio.js';
 
+// 定义表格列：移除 ES 和 AD，增加 fdr_ks 和 fdr_ad
 const COLS = [
   { id:'rank',     hdr:'#',                            extra:false, sort:false },
   { id:'name',     hdr:'Pathway',                      extra:false, sort:true  },
   { id:'size',     hdr:'Size',                         extra:false, sort:true  },
-  // KS 核心指标
   { id:'nes',      hdr:'NES',                          extra:false, sort:true  },
   { id:'fdr_ks',   hdr:'FDR (KS)',                     extra:false, sort:true  },
-  // AD 核心指标
   { id:'nes_ad',   hdr:'NES-AD',                       extra:false, sort:true  },
   { id:'fdr_ad',   hdr:'FDR (AD)',                     extra:false, sort:true  },
-  // 综合指标
-  { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:false, sort:true  },
-  
-  // 扩展列 (默认隐藏，点击 Extended columns 切换)
+  // 辅助/次要信息放入扩展列
   { id:'pKS',      hdr:'p<sub>KS</sub>',               extra:true,  sort:true  },
   { id:'pAD',      hdr:'p<sub>AD</sub>',               extra:true,  sort:true  },
+  { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:true,  sort:true  },
   { id:'pKS_emp',  hdr:'p<sub>KS</sub>&nbsp;(perm)',   extra:true,  sort:true  },
   { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
   { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
 ];
 
-let _sortCol = 'fdr_ks'; // 默认按 KS 的 FDR 排序
+let _sortCol = 'fdr_ks'; // 默认按标准 FDR 排序
 let _sortDir = 1;
 
 export function renderTable(results, showFDR, engine, onSelect) {
@@ -48,8 +45,7 @@ function _buildHead(engine) {
     const xc  = c.extra  ? 'col-ext' : '';
     const sc  = c.sort   ? 'sortable' : '';
     const ar  = c.sort   ? '<span class="si"></span>' : '';
-    const cur = c.id === _sortCol ? (_sortDir === 1 ? 'sort-asc' : 'sort-desc') : '';
-    return `<th class="${xc} ${sc} ${cur}" data-col="${c.id}">${lbl}${ar}</th>`;
+    return `<th class="${xc} ${sc}" data-col="${c.id}">${lbl}${ar}</th>`;
   });
 
   document.getElementById('rt-head').innerHTML = `<tr>${ths.join('')}</tr>`;
@@ -67,16 +63,16 @@ function _buildBody(results, onSelect) {
     const url = msigdbUrl(r.name, r.url);
     tr.innerHTML = COLS.map(c => _cell(c.id, r, rank, url)).join('');
 
-    // 点击行选择通路
-    tr.addEventListener('click', () => {
-      _selectRow(tr); 
-      onSelect(r);
+    tr.querySelector('.path-name-btn')?.addEventListener('click', e => {
+      e.stopPropagation(); _selectRow(tr); onSelect(r);
+    });
+    tr.querySelector('.btn-plot')?.addEventListener('click', e => {
+      e.stopPropagation(); _selectRow(tr); onSelect(r);
     });
 
     tbody.appendChild(tr);
   });
 
-  // 默认选中第一行
   const first = tbody.firstElementChild;
   if (first) {
     first.classList.add('sel');
@@ -87,18 +83,17 @@ function _buildBody(results, onSelect) {
 
 // ── Single cell renderer ──────────────────────────────────────
 function _cell(id, r, rank, url) {
-  // P-value 着色逻辑
+  // P-value 样式 (0.05/0.01)
   const pc = p =>
     p == null ? '' :
-    p < 0.001 ? 's001' :
     p < 0.01  ? 's01'  :
     p < 0.05  ? 's05'  : '';
 
-  // FDR 着色逻辑 (GSEA 标准: < 0.05 显著, < 0.25 值得关注)
+  // FDR 样式：GSEA 官方标准中 0.25 也是一个重要阈值
   const fc = f =>
     f == null ? '' :
-    f < 0.05  ? 'fsig' : 
-    f < 0.25  ? 'fwarn' : '';
+    f < 0.05  ? 'fsig' :  // 强显著 (绿色/深色)
+    f < 0.25  ? 'fwarn' : ''; // 潜在显著 (橙色/浅色)
 
   const fp = p =>
     p == null ? '—' :
@@ -122,23 +117,23 @@ function _cell(id, r, rank, url) {
     case 'nes':
       return `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`;
 
-    case 'fdr_ks':
-      return `<td class="fv ${fc(r.fdr_ks)}">${fp(r.fdr_ks)}</td>`;
-
     case 'nes_ad':
       return `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`;
+
+    case 'fdr_ks':
+      return `<td class="fv ${fc(r.fdr_ks)}">${fp(r.fdr_ks)}</td>`;
 
     case 'fdr_ad':
       return `<td class="fv ${fc(r.fdr_ad)}">${fp(r.fdr_ad)}</td>`;
 
-    case 'pCauchy':
-      return `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`;
-
     case 'pKS':
-      return `<td class="pv col-ext ${pc(r.pKS)}">${fp(r.pKS)}</td>`;
+      return `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`;
 
     case 'pAD':
-      return `<td class="pv col-ext ${pc(r.pAD)}">${fp(r.pAD)}</td>`;
+      return `<td class="pv ${pc(r.pAD)}">${fp(r.pAD)}</td>`;
+
+    case 'pCauchy':
+      return `<td class="pv col-ext ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`;
 
     case 'pKS_emp':
       return `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`;
@@ -161,7 +156,9 @@ function _attachSort(results, onSelect) {
       const col = th.dataset.col;
       _sortDir  = col === _sortCol ? -_sortDir : 1;
       _sortCol  = col;
-      _buildHead(); // 更新箭头
+      document.querySelectorAll('#rt-head th')
+        .forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
       _buildBody(results, onSelect);
     });
   });
@@ -172,12 +169,12 @@ function _sorted(results) {
     name:    r => r.name,
     size:    r => r.size,
     nes:     r => r.nes,
-    fdr_ks:  r => r.fdr_ks ?? 1,
     nes_ad:  r => r.nes_ad,
-    fdr_ad:  r => r.fdr_ad ?? 1,
-    pCauchy: r => r.pCauchy,
+    fdr_ks:  r => r.fdr_ks,
+    fdr_ad:  r => r.fdr_ad,
     pKS:     r => r.pKS,
     pAD:     r => r.pAD,
+    pCauchy: r => r.pCauchy,
     pKS_emp: r => r.pKS_emp,
     pAD_emp: r => r.pAD_emp,
     pAD_par: r => r.pAD_par ?? 1,
@@ -185,15 +182,15 @@ function _sorted(results) {
 
   return [...results].sort((a, b) => {
     const av = key(a), bv = key(b);
-    if (typeof av === 'string') {
-      return _sortDir * av.localeCompare(bv);
-    }
-    return _sortDir * (av - bv);
+    return typeof av === 'string'
+      ? _sortDir * av.localeCompare(bv)
+      : _sortDir * (av - bv);
   });
 }
 
 function _selectRow(tr) {
-  document.querySelectorAll('#tbody tr').forEach(t => t.classList.remove('sel'));
+  document.querySelectorAll('#tbody tr')
+    .forEach(t => t.classList.remove('sel'));
   tr.classList.add('sel');
 }
 
