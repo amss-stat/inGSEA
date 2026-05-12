@@ -108,27 +108,38 @@ export function setWebRStatus(state, msg) {
 export function downloadCSV(results, engine) {
   if (!results?.length) return;
   const isP = engine === 'parametric';
+
+  // Issue (6): parametric and empirical are now separate columns
   const hdr = [
-    'Pathway','Size','NES_KS','NES_AD','ES','AD',
-    isP ? 'pKS_gamma' : 'pKS_emp',
-    isP ? 'pAD_GG'    : 'pAD_emp',
-    'pCauchy','FDR','pKS_emp','pAD_emp'
+    'Pathway', 'Size', 'NES_KS', 'NES_AD', 'ES', 'AD',
+    ...(isP ? ['pKS_par', 'pAD_par'] : []),
+    'pKS_emp', 'pAD_emp',
+    'pCauchy', 'FDR'
   ];
+
   const rows = [hdr.join(',')];
   for (const r of results) {
     rows.push([
-      `"${r.name}"`, r.size,
-      r.nes.toFixed(6),    r.nes_ad.toFixed(6),
-      r.es.toFixed(6),     r.ad.toFixed(4),
-      r.pKS.toExponential(6), r.pAD.toExponential(6),
+      `"${r.name}"`,
+      r.size,
+      r.nes.toFixed(6),
+      r.nes_ad.toFixed(6),
+      r.es.toFixed(6),
+      r.ad.toFixed(4),
+      ...(isP ? [
+        r.pKS_par != null ? r.pKS_par.toExponential(6) : '',
+        r.pAD_par != null ? r.pAD_par.toExponential(6) : ''
+      ] : []),
+      r.pKS_emp.toExponential(6),
+      r.pAD_emp.toExponential(6),
       r.pCauchy.toExponential(6),
-      r.fdr != null ? r.fdr.toExponential(6) : '',
-      r.pKS_emp.toExponential(6), r.pAD_emp.toExponential(6)
+      r.fdr != null ? r.fdr.toExponential(6) : ''
     ].join(','));
   }
+
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a    = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(blob),
+    href:     URL.createObjectURL(blob),
     download: 'igsea_results.csv'
   });
   a.click();
