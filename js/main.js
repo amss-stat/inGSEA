@@ -35,31 +35,30 @@ const S = {
 function checkJStat() {
   const badge = document.getElementById('jstat-status');
 
+  // Verify using the actual v1.9.6 API names
   const ok = typeof jStat !== 'undefined'
-           && typeof jStat.lngamma    === 'function'
-           && typeof jStat.gammainc   === 'function'
-           && typeof jStat.normal     === 'object'
-           && typeof jStat.gamma      === 'object';
+           && typeof jStat.gammaln  === 'function'   // NOT lngamma
+           && typeof jStat.gammainc === 'function'
+           && typeof jStat.normal   === 'object'
+           && typeof jStat.gamma    === 'object';
 
   if (ok) {
     log('jStat ready', 'ok');
     badge.textContent = 'jStat ✓';
     badge.className   = 'jstat-badge ok';
   } else {
-    // Self-hosted file missing or corrupted — tell developer exactly why
     const missing = [];
-    if (typeof jStat === 'undefined')            missing.push('jStat global');
-    else {
-      if (!jStat.lngamma)                        missing.push('lngamma');
-      if (!jStat.gammainc)                       missing.push('gammainc');
-      if (!jStat.normal)                         missing.push('normal');
-      if (!jStat.gamma)                          missing.push('gamma');
+    if (typeof jStat === 'undefined') {
+      missing.push('jStat global');
+    } else {
+      if (typeof jStat.gammaln  !== 'function') missing.push('gammaln');
+      if (typeof jStat.gammainc !== 'function') missing.push('gammainc');
+      if (typeof jStat.normal   !== 'object')   missing.push('normal');
+      if (typeof jStat.gamma    !== 'object')    missing.push('gamma');
     }
-    const reason = `js/vendor/jstat.min.js: missing [${missing.join(', ')}]`;
-    log(`jStat unavailable — ${reason}`, 'err');
+    log(`jStat check failed — missing: [${missing.join(', ')}]`, 'err');
     badge.textContent = 'jStat ✗';
     badge.className   = 'jstat-badge err';
-
     const opt = document.querySelector(
       '#sel-engine option[value="parametric"]');
     if (opt) opt.disabled = true;
