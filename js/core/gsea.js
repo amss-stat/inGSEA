@@ -1,19 +1,34 @@
 // ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.9 (Standard GSEA FDR Edition)
+//  core/gsea.js  ·  v2.9
+//
+//  Pipeline:
+//    1. Observed SNR + enrichment stats
+//    2. Permutations → nullKS[nP][nPerms], nullAD[nP][nPerms]
+//    3. Empirical p-values (KS two-sided, AD one-sided)
+//    4. AD parametric fitting via GG (engine='parametric')
+//    5. Cauchy combination → pCauchy
+//    6. Permutation FDR on pCauchy (reuses nullKS/nullAD)
+//
+//  KS p-value: always empirical (KS null ES is signed,
+//              gamma approximation inapplicable)
+//  AD p-value: parametric GG when engine='parametric',
+//              empirical fallback when fit fails
+//  FDR:        permutation-based, preserves inter-pathway
+//              correlation structure, no distribution assumption
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
 import {
   calcSNR, rankOrder, calcGSEAStats,
-  cauchyCombine, shuffle,
+  cauchyCombine, bhFDR, shuffle,
   calcNES, calcNES_AD, empP_KS, empP_AD,
-  calcGseaFDR // 确保 math.js 中已添加此函数或在本文件末尾补充
+  permFDR
 } from './math.js';
 
 import { pvalGG } from './distributions.js';
 
 const MAX_PERMS       = 2000;
-const TARGET_CHUNK_MS = 10; 
+const TARGET_CHUNK_MS = 16;
 
 export async function runGSEA(opts) {
   const {
@@ -29,7 +44,9 @@ export async function runGSEA(opts) {
   const wt     = typeof opts.weightP === 'number' ? opts.weightP : 1;
 
   if (nCase < 2 || nCase > nS - 2)
-    throw new Error(`nCase out of range`);
+    throw new Error(
+      `nCase=${nCase} out of range [2, ${nS - 2}] (nSamples=${nS})`
+    );
 
   const _ab = () => abortSignal?.aborted === true;
 
@@ -40,8 +57,10 @@ export async function runGSEA(opts) {
 
   // ── 1. Observed ───────────────────────────────────────────
   onProgress(0, 'Observed', 'Computing SNR & enrichment…');
+
   const obsSNR = new Float64Array(nG);
   calcSNR(exprMat, nG, cIdx, tIdx, obsSNR);
+
   const obsOrd = new Array(nG);
   rankOrder(obsSNR, nG, obsOrd);
 
@@ -49,212 +68,232 @@ export async function runGSEA(opts) {
     calcGSEAStats(obsSNR, obsOrd, p.mask, nG, true, wt)
   );
 
+  if (_ab()) throw new Error('Aborted');
+
   // ── 2. Permutations ───────────────────────────────────────
+  // nullKS[pi][j] = KS enrichment score for pathway pi,
+  //                 permutation j  (signed, can be negative)
+  // nullAD[pi][j] = AD statistic  (always non-negative)
   const nullKS = Array.from({ length: nP }, () => new Float64Array(nPerms));
   const nullAD = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
   const permArr = new Uint16Array(nS);
   for (let i = 0; i < nS; i++) permArr[i] = i;
+
+  // Float32 for permutation SNR: halves memory bandwidth,
+  // precision sufficient for ranking only
   const permSNR = new Float32Array(nG);
   const permOrd = new Array(nG);
   const permC   = permArr.subarray(0, nCase);
   const permT   = permArr.subarray(nCase);
 
-  let done = 0;
-  let chunkSize = 5;
   const t0 = performance.now();
+  let chunkSize = 5;
+  let done = 0;
 
   while (done < nPerms) {
     if (_ab()) throw new Error('Aborted');
+
+    const end    = Math.min(done + chunkSize, nPerms);
     const tChunk = performance.now();
-    const end = Math.min(done + chunkSize, nPerms);
 
     for (let j = done; j < end; j++) {
       shuffle(permArr);
       calcSNR(exprMat, nG, permC, permT, permSNR);
       rankOrder(permSNR, nG, permOrd);
       for (let pi = 0; pi < nP; pi++) {
-        const st = calcGSEAStats(permSNR, permOrd, pathways[pi].mask, nG, false, wt);
+        const st = calcGSEAStats(
+          permSNR, permOrd, pathways[pi].mask, nG, false, wt
+        );
         nullKS[pi][j] = st.ks;
         nullAD[pi][j] = st.ad;
       }
     }
+
     done = end;
+
+    // Adaptive chunk sizing: target TARGET_CHUNK_MS per chunk
     const elapsed = performance.now() - tChunk;
     if (elapsed > 0 && done < nPerms) {
-      chunkSize = Math.max(1, Math.min(500, Math.round(chunkSize * TARGET_CHUNK_MS / elapsed)));
+      const newChunk = Math.round(chunkSize * TARGET_CHUNK_MS / elapsed);
+      chunkSize = Math.max(1, Math.min(500, newChunk));
     }
-    onProgress(Math.round(done/nPerms*70), 'Permutations', `${done}/${nPerms} perms`);
+
+    const totalElapsed = (performance.now() - t0) / 1000;
+    const pct  = Math.round(done / nPerms * 75);
+    const eta  = totalElapsed > 0.1
+      ? ((nPerms - done) / (done / totalElapsed)).toFixed(0) : '—';
+    const rate = (done / (totalElapsed + 0.001)).toFixed(0);
+    onProgress(pct, 'Permutations',
+      `${done}/${nPerms} · ETA ${eta}s · ${rate} perm/s`);
+
     await _yield();
   }
 
-  // ── 3. Normalization (The GSEA Secret Sauce) ──────────────
-  onProgress(71, 'Normalization', 'Calculating Null NES Matrix…');
-  
-  const nullNES_KS = Array.from({ length: nP }, () => new Float64Array(nPerms));
-  const nullNES_AD = Array.from({ length: nP }, () => new Float64Array(nPerms));
+  if (_ab()) throw new Error('Aborted');
 
-  for (let pi = 0; pi < nP; pi++) {
-    if (_ab()) throw new Error('Aborted');
-    
-    // KS 归一化参数：分别计算正负 ES 的均值
-    let posSum = 0, posCnt = 0, negSum = 0, negCnt = 0;
-    const ksVec = nullKS[pi];
-    for (let j = 0; j < nPerms; j++) {
-      const v = ksVec[j];
-      if (v >= 0) { posSum += v; posCnt++; }
-      else { negSum += Math.abs(v); negCnt++; }
-    }
-    const posMean = posCnt > 0 ? posSum / posCnt : 1e-9;
-    const negMean = negCnt > 0 ? negSum / negCnt : 1e-9;
+  // ── 3. Empirical p-values & NES ───────────────────────────
+  onProgress(76, 'Statistics', 'Empirical p-values & NES…');
+  await _yield();
 
-    // AD 归一化参数：计算 AD 的均值 (AD永远为正)
-    let adSum = 0;
-    const adVec = nullAD[pi];
-    for (let j = 0; j < nPerms; j++) adSum += adVec[j];
-    const adMean = adSum / nPerms || 1e-9;
-
-    for (let j = 0; j < nPerms; j++) {
-      nullNES_KS[pi][j] = ksVec[j] >= 0 ? ksVec[j] / posMean : ksVec[j] / negMean;
-      nullNES_AD[pi][j] = adVec[j] / adMean;
-    }
-    if (pi % 100 === 0) await _yield();
-  }
-
-  // ── 4. Empirical Statistics & Observed NES ────────────────
-  onProgress(80, 'Statistics', 'p-values & NES…');
   const empArr = new Array(nP);
   for (let pi = 0; pi < nP; pi++) {
+    if (_ab()) throw new Error('Aborted');
+
     const ok = obsStats[pi].ks;
     const oa = obsStats[pi].ad;
     empArr[pi] = {
-      ok, oa,
+      ok,
+      oa,
       pKS_emp: empP_KS(ok, nullKS[pi], nPerms),
       pAD_emp: empP_AD(oa, nullAD[pi], nPerms),
       nes:     calcNES(ok, nullKS[pi]),
       nes_ad:  calcNES_AD(oa, nullAD[pi])
     };
-    if (pi % 100 === 99) await _yield();
+
+    if (pi % 50 === 49) {
+      onProgress(76, 'Statistics',
+        `Empirical p-values (${pi + 1}/${nP})…`);
+      await _yield();
+    }
   }
 
-  // ── 5. Standard GSEA FDR (Pooled Distribution) ────────────
-  onProgress(85, 'FDR', 'Pooling distributions…');
-  
-  const obsNES_KS = empArr.map(e => e.nes);
-  const obsNES_AD = empArr.map(e => e.nes_ad);
+  if (_ab()) throw new Error('Aborted');
 
-  // 调用封装在 math.js 中的全局 FDR 计算逻辑
-  const fdrKS = internalCalcGseaFDR(obsNES_KS, nullNES_KS, true);
-  const fdrAD = internalCalcGseaFDR(obsNES_AD, nullNES_AD, false);
+  // ── 4. AD parametric fitting (engine = 'parametric') ──────
+  // KS always uses empirical p-values:
+  //   null KS ES is signed (positive and negative), making
+  //   gamma approximation inapplicable.
+  // AD uses GG parametric approximation when requested:
+  //   AD statistic is always non-negative, GG fit is appropriate.
+  //   Falls back to empirical if fit fails.
 
-  // ── 6. Parametric Fitting (Optional) ──────────────────────
-  const useParam = engine === 'parametric';
-  const pAD_final = new Float64Array(nP);
+  const useParam    = engine === 'parametric';
+  const pKS_arr     = new Array(nP);
+  const pAD_arr     = new Array(nP);
   const pAD_par_arr = new Array(nP).fill(null);
 
+  // KS: always empirical
+  for (let pi = 0; pi < nP; pi++) {
+    pKS_arr[pi] = empArr[pi].pKS_emp;
+  }
+
   if (useParam) {
+    onProgress(80, 'Fitting', 'Fitting AD null distributions (GG)…');
+    await _yield();
+
+    let fitSuccess = 0;
     for (let pi = 0; pi < nP; pi++) {
       if (_ab()) throw new Error('Aborted');
-      const res = pvalGG(empArr[pi].oa, nullAD[pi], empArr[pi].pAD_emp);
+
+      const r   = empArr[pi];
+      // nullAD[pi] is Float64Array — pvalGG handles TypedArray directly
+      // (pvalGG builds a plain Array internally via new Array(n) + index)
+      const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
+
       if (res.fitted) {
         pAD_par_arr[pi] = res.p;
-        pAD_final[pi] = res.p;
+        pAD_arr[pi]     = res.p;
+        fitSuccess++;
       } else {
-        pAD_final[pi] = empArr[pi].pAD_emp;
+        pAD_arr[pi] = r.pAD_emp;
       }
-      if (pi % 20 === 0) {
-        onProgress(85 + Math.round(pi/nP*10), 'Fitting', `Fitting AD ${pi}/${nP}`);
+
+      // Yield every 5 pathways: each pvalGG call runs Nelder-Mead
+      // (up to 1000 iterations), so 5 pathways ≈ 5-25ms
+      if (pi % 5 === 4 || pi === nP - 1) {
+        const pct = 80 + Math.round(((pi + 1) / nP) * 10);
+        onProgress(pct, 'Fitting',
+          `AD fitting (${pi + 1}/${nP}) · fitted: ${fitSuccess}`);
         await _yield();
       }
     }
+
+    console.log(`GG fit: ${fitSuccess}/${nP} pathways fitted parametrically`);
   } else {
-    for (let pi = 0; pi < nP; pi++) pAD_final[pi] = empArr[pi].pAD_emp;
+    // Permutation engine: both KS and AD use empirical p-values
+    for (let pi = 0; pi < nP; pi++) {
+      pAD_arr[pi] = empArr[pi].pAD_emp;
+    }
   }
 
-  // ── 7. Assemble ───────────────────────────────────────────
-  onProgress(98, 'Assembling', 'Finalising results…');
-  const results = [];
+  if (_ab()) throw new Error('Aborted');
+
+  // ── 5. Cauchy combination ─────────────────────────────────
+  // Combines pKS (empirical) and pAD (parametric or empirical)
+  // into a single p-value per pathway.
+  // Liu & Xie (2020): robust to correlation between input p-values.
+  onProgress(91, 'Combining', 'Cauchy combination…');
+  await _yield();
+
+  const pCauchy_arr = new Array(nP);
   for (let pi = 0; pi < nP; pi++) {
-    const e = empArr[pi];
-    const pC = cauchyCombine(e.pKS_emp, pAD_final[pi]);
-    
-    results.push({
-      name:     pathways[pi].name,
-      url:      pathways[pi].url ?? null,
-      size:     pathways[pi].size,
-      es:       e.ok,
-      ad:       e.oa,
-      nes:      e.nes,
-      nes_ad:   e.nes_ad,
-      pKS:      e.pKS_emp,
-      pAD:      pAD_final[pi],
-      pCauchy:  pC,
-      fdr_ks:   fdrKS[pi],  // 标准 GSEA FDR (KS)
-      fdr_ad:   fdrAD[pi],  // 标准 GSEA FDR (AD)
-      pKS_emp:  e.pKS_emp,
-      pAD_emp:  e.pAD_emp,
-      pAD_par:  pAD_par_arr[pi],
-      curve:    obsStats[pi].curve,
-      obsOrd,
-      peakIdx:  obsStats[pi].peakIdx
-    });
+    pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  onProgress(100, 'Done', `Complete`);
-  return results;
-}
+  // ── 6. Permutation FDR on pCauchy ─────────────────────────
+  // Builds null pCauchy distribution from existing nullKS/nullAD
+  // matrices using rank-based p-value approximation.
+  // Preserves inter-pathway correlation without additional permutations.
+  // Falls back to BH if nP < 2.
+  onProgress(93, 'FDR', 'Permutation FDR…');
+  await _yield();
 
-/**
- * 内部 GSEA 风格 FDR 计算
- * 如果 math.js 里没写，可以直接放在这里
- */
-function internalCalcGseaFDR(obsNES, nullNESMat, twoSided) {
-  const nP = obsNES.length;
-  const nPerms = nullNESMat[0].length;
-  const fdr = new Float64Array(nP);
-
-  if (twoSided) {
-    // KS 分正负池
-    const nullPos = [], nullNeg = [];
-    for (let i = 0; i < nP; i++) {
-      const vec = nullNESMat[i];
-      for (let j = 0; j < nPerms; j++) {
-        if (vec[j] >= 0) nullPos.push(vec[j]); else nullNeg.push(vec[j]);
-      }
-    }
-    const obsPos = obsNES.filter(v => v >= 0);
-    const obsNeg = obsNES.filter(v => v < 0);
-
-    for (let i = 0; i < nP; i++) {
-      const nes = obsNES[i];
-      const isPos = nes >= 0;
-      const pool = isPos ? nullPos : nullNeg;
-      const obsGroup = isPos ? obsPos : obsNeg;
-
-      const countNull = pool.reduce((acc, v) => isPos ? (v >= nes ? acc + 1 : acc) : (v <= nes ? acc + 1 : acc), 0);
-      const countObs  = obsGroup.reduce((acc, v) => isPos ? (v >= nes ? acc + 1 : acc) : (v <= nes ? acc + 1 : acc), 0);
-      
-      const phiNull = countNull / pool.length;
-      const phiObs  = countObs / obsGroup.length;
-      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
-    }
+  let fdrArr;
+  if (nP >= 2) {
+    fdrArr = permFDR(pCauchy_arr, nullKS, nullAD, nPerms);
   } else {
-    // AD 单向池 (全是正数)
-    const nullPool = [];
-    for (let i = 0; i < nP; i++) {
-      const vec = nullNESMat[i];
-      for (let j = 0; j < nPerms; j++) nullPool.push(vec[j]);
-    }
-    for (let i = 0; i < nP; i++) {
-      const nes = obsNES[i];
-      const countNull = nullPool.reduce((acc, v) => v >= nes ? acc + 1 : acc, 0);
-      const countObs  = obsNES.reduce((acc, v) => v >= nes ? acc + 1 : acc, 0);
-      const phiNull = countNull / nullPool.length;
-      const phiObs  = countObs / nP;
-      fdr[i] = Math.min(1.0, phiNull / (phiObs + 1e-10));
-    }
+    // Single pathway: FDR undefined, set to pCauchy itself
+    fdrArr = Float64Array.from(pCauchy_arr);
   }
-  return fdr;
+
+  if (_ab()) throw new Error('Aborted');
+
+  // ── 7. Assemble results ───────────────────────────────────
+  onProgress(98, 'Assembling', 'Assembling results…');
+  await _yield();
+
+  const results = pathways.map((p, pi) => {
+    const e = empArr[pi];
+    return {
+      name:    p.name,
+      url:     p.url ?? null,
+      size:    p.size,
+
+      // Effect sizes
+      es:      e.ok,          // raw enrichment score (signed)
+      ad:      e.oa,          // Anderson-Darling statistic
+      nes:     e.nes,         // normalised ES (KS)
+      nes_ad:  e.nes_ad,      // normalised AD
+
+      // Primary p-values (displayed in table)
+      // pKS: always empirical permutation p-value
+      // pAD: parametric GG if fitted, else empirical
+      pKS:     pKS_arr[pi],
+      pAD:     pAD_arr[pi],
+      pCauchy: pCauchy_arr[pi],
+
+      // Empirical p-values (always available, shown in extended cols)
+      pKS_emp: e.pKS_emp,
+      pAD_emp: e.pAD_emp,
+
+      // Parametric AD p-value: null when engine='permutation'
+      // or when GG fit failed; shown in extended cols
+      pKS_par: null,          // KS has no parametric path
+      pAD_par: pAD_par_arr[pi],
+
+      // FDR: permutation-based on pCauchy
+      fdr:     fdrArr[pi],
+
+      // Curve data (only for observed, not permutations)
+      curve:   obsStats[pi].curve,
+      obsOrd,
+      peakIdx: obsStats[pi].peakIdx
+    };
+  });
+
+  onProgress(100, 'Done', `${results.length} pathway(s) complete`);
+  return results;
 }
 
 const _yield = () => new Promise(r => setTimeout(r, 0));
