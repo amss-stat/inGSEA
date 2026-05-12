@@ -5,11 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>iGSEA · Improved Gene Set Enrichment Analysis</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
-  <!-- jStat: battle-tested statistical library providing
-       regularised incomplete gamma, lngamma, normal CDF.
-       These are the only special functions we need for GG fitting. -->
   <script src="https://cdn.jsdelivr.net/npm/jstat@1.9.6/dist/jstat.min.js"></script>
 </head>
 <body>
@@ -18,7 +16,8 @@
 
 <header class="hdr">
   <svg class="hdr-logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <rect x="1" y="1" width="30" height="30" rx="3" stroke="#1a5fa8" stroke-width="1.5"/>
+    <rect x="1" y="1" width="30" height="30" rx="3"
+          stroke="#1a5fa8" stroke-width="1.5"/>
     <polyline points="4,22 9,14 14,17.5 21,7 28,12"
               stroke="#1a5fa8" stroke-width="1.8" fill="none"
               stroke-linejoin="round" stroke-linecap="round"/>
@@ -28,10 +27,13 @@
   </svg>
   <div class="hdr-brand">
     <div class="hdr-title">iGSEA</div>
-    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.3</div>
+    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.4</div>
   </div>
   <nav class="hdr-nav">
     <span class="jstat-badge" id="jstat-status">jStat…</span>
+    <span class="browser-note" title="Chrome provides significantly faster JS engine performance for iGSEA">
+      🌐 Chrome recommended
+    </span>
     <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
        target="_blank" rel="noopener" class="nav-link">MSigDB</a>
     <a href="https://github.com/your-repo/igsea"
@@ -48,8 +50,10 @@
     <div class="dz" id="dz-expr">
       <input type="file" id="fi-expr" accept=".csv,.txt,.tsv">
       <div class="dz-icon">📊</div>
-      <div class="dz-hint">Drop CSV, TSV, or TXT here<br>
-        <span class="hint-sub">rows = genes · cols = samples</span></div>
+      <div class="dz-hint">
+        Drop CSV, TSV, or TXT here<br>
+        <span class="hint-sub">rows = genes · cols = samples</span>
+      </div>
       <div class="dz-name"  id="fn-expr"></div>
       <div class="dz-stats" id="st-expr"></div>
     </div>
@@ -60,28 +64,50 @@
     <div class="dz" id="dz-path">
       <input type="file" id="fi-path" accept=".gmt,.txt">
       <div class="dz-icon">🧬</div>
-      <div class="dz-hint">Drop MSigDB GMT or TXT here<br>
-        <span class="hint-sub">name⟨tab⟩url⟨tab⟩gene1⟨tab⟩gene2⟨tab⟩…</span></div>
+      <div class="dz-hint">
+        Drop MSigDB GMT or TXT here<br>
+        <span class="hint-sub">name⟨tab⟩url⟨tab⟩gene1⟨tab⟩gene2…</span>
+      </div>
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
     </div>
     <div class="gmt-download-note">
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
-         target="_blank" rel="noopener">↗ Download GMT files from MSigDB</a>
+         target="_blank" rel="noopener">
+        ↗ Download GMT files from MSigDB
+      </a>
     </div>
   </div>
 
   <div class="sec">
     <div class="sec-lbl">Parameters</div>
+
     <div class="fg">
-      <label class="fl" for="n-case">Case samples — first <em>N</em> columns</label>
+      <label class="fl" for="n-case">
+        Case samples — first <em>N</em> columns
+      </label>
       <input type="number" class="fi" id="n-case" value="10" min="2">
     </div>
+
     <div class="fg">
-      <label class="fl" for="n-perms">Permutations
-        <span class="fl-note">(max 2 000)</span></label>
-      <input type="number" class="fi" id="n-perms" value="1000" min="50" max="2000">
+      <label class="fl" for="n-perms">
+        Permutations <span class="fl-note">(max 2 000)</span>
+      </label>
+      <input type="number" class="fi" id="n-perms"
+             value="1000" min="50" max="2000">
     </div>
+
+    <div class="fg">
+      <label class="fl" for="weight-p">
+        Weight exponent <em>p</em>
+        <span class="fl-note" title="p=0: classical unweighted KS; p=1: standard GSEA (default); p=2: quadratic">
+          0 = KS · 1 = GSEA default · 2 = quadratic
+        </span>
+      </label>
+      <input type="number" class="fi" id="weight-p"
+             value="1" min="0" max="3" step="0.5">
+    </div>
+
     <div class="fg">
       <label class="fl">Pathway selection</label>
       <div class="pm-tabs" role="tablist">
@@ -96,9 +122,12 @@
       </div>
       <div id="sel-multi-wrap" style="display:none;margin-top:6px">
         <select class="fi" id="sel-multi" multiple size="5"></select>
-        <div class="hint-sub" style="margin-top:3px">Ctrl / ⌘ + click to select multiple</div>
+        <div class="hint-sub" style="margin-top:3px">
+          Ctrl / ⌘ + click to select multiple
+        </div>
       </div>
     </div>
+
     <div class="fg">
       <label class="fl" for="sel-engine">Statistical engine</label>
       <select class="fi" id="sel-engine">
@@ -110,7 +139,6 @@
       </div>
     </div>
 
-    <!-- Action buttons row -->
     <div class="btn-row">
       <button class="btn-run" id="btn-run" disabled>▶ Run iGSEA</button>
     </div>
@@ -128,7 +156,9 @@
         <span id="prog-phase">Permutations</span>
         <span id="prog-pct">0%</span>
       </div>
-      <div class="prog-bg"><div class="prog-fill" id="prog-fill"></div></div>
+      <div class="prog-bg">
+        <div class="prog-fill" id="prog-fill"></div>
+      </div>
       <div class="prog-msg" id="prog-msg">Initialising…</div>
     </div>
   </div>
@@ -154,7 +184,8 @@
   <div id="empty-state" class="empty-state">
     <svg width="56" height="56" viewBox="0 0 64 64" fill="none"
          style="opacity:.2;margin-bottom:16px" aria-hidden="true">
-      <rect x="2" y="2" width="60" height="60" rx="6" stroke="#1a5fa8" stroke-width="2"/>
+      <rect x="2" y="2" width="60" height="60" rx="6"
+            stroke="#1a5fa8" stroke-width="2"/>
       <polyline points="8,44 18,28 28,35 42,14 56,24"
                 stroke="#1a5fa8" stroke-width="2.5" fill="none"
                 stroke-linejoin="round" stroke-linecap="round"/>
@@ -169,6 +200,7 @@
   </div>
 
   <div id="res-panel" style="display:none">
+
     <div class="res-toolbar">
       <div class="res-toolbar-left">
         <span class="res-count" id="res-count"></span>
@@ -180,6 +212,13 @@
         </label>
         <button class="btn-secondary btn-sm" id="btn-dl">⬇ Export CSV</button>
       </div>
+    </div>
+
+    <!-- FDR note (shown when FDR column is visible) -->
+    <div class="fdr-note" id="fdr-note" style="display:none">
+      <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5) when
+      most pathways are null — this is expected and statistically correct.
+      FDR control is stringent with many pathways tested simultaneously.
     </div>
 
     <div class="tbl-wrap">
@@ -199,27 +238,39 @@
             ↗ MSigDB
           </a>
         </div>
-        <span class="plot-hint">📈 row to plot · scroll to zoom · dbl-click to reset</span>
+        <div class="plot-controls">
+          <button class="btn-secondary btn-sm" id="btn-reset-zoom"
+                  title="Reset zoom to full view">⊡ Reset zoom</button>
+          <span class="plot-hint">📈 row · scroll/drag to zoom &amp; pan · dbl-click reset</span>
+        </div>
       </div>
       <div class="svg-wrap" id="svg-wrap"></div>
       <div class="es-stats" id="es-stats"></div>
     </div>
+
   </div>
 
   <div id="ref-section" class="ref-section">
     <div class="sec-lbl" style="padding:0 0 8px 0">References &amp; Resources</div>
     <ol class="ref-list">
-      <li>Subramanian A, <em>et al.</em> (2005). Gene set enrichment analysis.
+      <li>
+        Subramanian A, <em>et al.</em> (2005).
+        Gene set enrichment analysis: a knowledge-based approach.
         <em>PNAS</em>, 102(43), 15545–15550.
-        <a href="https://doi.org/10.1073/pnas.0506580102" target="_blank" rel="noopener">doi:10.1073/pnas.0506580102</a>
+        <a href="https://doi.org/10.1073/pnas.0506580102"
+           target="_blank" rel="noopener">doi:10.1073/pnas.0506580102</a>
       </li>
-      <li>Liberzon A, <em>et al.</em> (2015). The MSigDB hallmark gene set collection.
+      <li>
+        Liberzon A, <em>et al.</em> (2015).
+        The Molecular Signatures Database hallmark gene set collection.
         <em>Cell Systems</em>, 1(6), 417–425.
-        <a href="https://doi.org/10.1016/j.cels.2015.12.004" target="_blank" rel="noopener">doi:10.1016/j.cels.2015.12.004</a>
+        <a href="https://doi.org/10.1016/j.cels.2015.12.004"
+           target="_blank" rel="noopener">doi:10.1016/j.cels.2015.12.004</a>
       </li>
-      <li class="ref-placeholder"><!-- additional references --></li>
+      <li class="ref-placeholder"></li>
     </ol>
-    <p class="ref-note">GMT files:
+    <p class="ref-note">
+      GMT files:
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
          target="_blank" rel="noopener">MSigDB Collections</a>
     </p>
