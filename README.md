@@ -1,11 +1,11 @@
-https://amss-stat.github.io/iGSEA-DEMO/
+https://amss-stat.github.io/adGSEA/
 
-# iGSEA — Improved Gene Set Enrichment Analysis
+# adGSEA — Improved Gene Set Enrichment Analysis
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.2.4-green.svg)]()
 
-A web-based implementation of the iGSEA framework, which extends classical
+A web-based implementation of the adGSEA framework, which extends classical
 Gene Set Enrichment Analysis with an Anderson-Darling enrichment score and
 Cauchy combination test for improved statistical power and robustness.
 
@@ -17,7 +17,7 @@ Cauchy combination test for improved statistical power and robustness.
 ## Overview
 
 Standard GSEA has limited power when pathways exhibit heterogeneous or
-non-concordant expression patterns. iGSEA addresses this by:
+non-concordant expression patterns. adGSEA addresses this by:
 
 - Integrating an **Anderson-Darling (AD) based enrichment score** that
   enhances detection of sparse and bidirectional signals
@@ -35,7 +35,7 @@ server.
 
 ## Live Demo
 
-[**Launch iGSEA →**](https://amss-stat.github.io/iGSEA-DEMO)
+[**Launch adGSEA →**](https://amss-stat.github.io/adGSEA)
 
 A built-in demo dataset (200 genes × 20 samples, 3 synthetic pathways) is
 available via the **⚡ Load demo dataset** button.
@@ -64,7 +64,7 @@ GMT files can be downloaded from
 5. Choose a **statistical engine**:
    - *Parametric Approximation* — generalised gamma null fit (faster)
    - *Permutation only* — empirical p-values only
-6. Click **▶ Run iGSEA**
+6. Click **▶ Run adGSEA**
 
 ### Output
 
@@ -118,7 +118,7 @@ Firefox and Edge are supported. Safari may be slower for large datasets.
 
 ## License
 
-The iGSEA source code is released under the
+The adGSEA source code is released under the
 [MIT License](LICENSE).
 
 GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for
@@ -130,4 +130,4 @@ Institute of MIT and Harvard).
 ## Contact
 
 For questions or bug reports, please open an issue on
-[GitHub](https://github.com/amss-stat/iGSEA-DEMO/issues).
+[GitHub](https://github.com/amss-stat/adGSEA/issues).
