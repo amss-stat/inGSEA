@@ -147,7 +147,7 @@ export function downloadCSV(results, engine) {
 
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.setAttribute('download', `igsea_results_${engine}.csv`);
+  link.setAttribute('download', `adgsea_results.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
