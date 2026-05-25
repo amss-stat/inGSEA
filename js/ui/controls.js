@@ -92,51 +92,65 @@ export function setRunEnabled(v) {
   document.getElementById('btn-run').disabled = !v;
 }
 
+
 // ── CSV export ───────────────────────────────────────────────
 export function downloadCSV(results, engine) {
   if (!results?.length) return;
-  const isP = engine === 'parametric';
 
   const hdr = [
-    'Pathway', 'Size',
-    'NES_KS', 'NES_AD',
-    'ES', 'AD',
-    'pKS_perm',                     // KS is always permutation
-    'pAD',                          // combined (par if available, else perm)
-    ...(isP ? ['pAD_par'] : []),    // parametric AD only when engine=parametric
-    'pAD_perm',                     // always empirical AD
-    'pCauchy', 'q_Storey'
+    '#',           // rank
+    'Pathway',     // name
+    'Size',        // size
+    'NES',         // nes
+    'NES_AD',      // nes_ad
+    'p_KS',        // pKS
+    'p_AD',        // pAD
+    'p_Cauchy',    // pCauchy
+    'FDR_KS',      // fdr_ks
+    'FDR_AD',      // fdr_ad
+    'pAD_perm',    // pAD_emp
+    'pAD_par'      // pAD_par
   ];
 
   const fp = v =>
-    v == null ? '' :
+    v == null || isNaN(v) ? '' :
     Math.abs(v) < 0.001 ? v.toExponential(6) : v.toFixed(6);
 
-  const rows = [hdr.join(',')];
-  for (const r of results) {
-    rows.push([
-      `"${r.name}"`,
-      r.size,
-      r.nes.toFixed(6),
-      r.nes_ad.toFixed(6),
-      r.es.toFixed(6),
-      r.ad.toFixed(4),
-      fp(r.pKS),                    // always = pKS_emp
-      fp(r.pAD),                    // par if fitted, else emp
-      ...(isP ? [fp(r.pAD_par)] : []),
-      fp(r.pAD_emp),
-      fp(r.pCauchy),
-      fp(r.fdr)
-    ].join(','));
-  }
+  const fn = v =>
+    v == null || isNaN(v) ? '' : v.toFixed(6);
 
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
-  const a    = Object.assign(document.createElement('a'), {
-    href:     URL.createObjectURL(blob),
-    download: 'adgsea_results.csv'
+  const rows = [hdr.join(',')];
+
+  results.forEach((r, idx) => {
+    const safeName = `"${r.name.replace(/"/g, '""')}"`;
+
+    const row = [
+      idx + 1,             // # (rank)
+      safeName,            // Pathway
+      r.size ?? '',        // Size
+      fn(r.nes),           // NES
+      fn(r.nes_ad),        // NES-AD
+      fp(r.pKS),           // p_KS
+      fp(r.pAD),           // p_AD
+      fp(r.pCauchy),       // p_Cauchy
+      fp(r.fdr_ks),        // FDR_KS
+      fp(r.fdr_ad),        // FDR_AD
+      fp(r.pAD_emp),       // pAD (perm)
+      fp(r.pAD_par)        // pAD (par)
+    ];
+    
+    rows.push(row.join(','));
   });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+
+  const csvContent = '\uFEFF' + rows.join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute('download', `igsea_results_${engine}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 // ── Demo data ────────────────────────────────────────────────
