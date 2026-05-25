@@ -133,7 +133,7 @@ export function downloadCSV(results, engine) {
   const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
   const a    = Object.assign(document.createElement('a'), {
     href:     URL.createObjectURL(blob),
-    download: 'igsea_results.csv'
+    download: 'adgsea_results.csv'
   });
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
