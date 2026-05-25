@@ -59,7 +59,7 @@ export async function exportAllCurves(results, pathways, geneNames, width = 900)
     const safe = r.name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 80);
     await exportSVGAsPNG(
       svgEl,
-      `igsea_${String(i + 1).padStart(3, '0')}_${safe}.png`
+      `adgsea_${String(i + 1).padStart(3, '0')}_${safe}.png`
     );
     await _sleep(120);
   }
