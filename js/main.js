@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  iGSEA v2.6
+//  main.js  ·  adgsea v2.6
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -87,7 +87,7 @@ document.getElementById('btn-dl-one-curve')
     const sel  = document.querySelector('#tbody tr.sel');
     const name = sel?.dataset.name ?? 'curve';
     const safe = name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
-    exportCurrentCurvePNG(`igsea_${safe}.png`);
+    exportCurrentCurvePNG(`adgsea_${safe}.png`);
   });
 
 // ── Batch curve PNG export ────────────────────────────────────
@@ -111,7 +111,7 @@ document.getElementById('btn-dl-nes')
     const svgEl = document.querySelector('#nes-chart-wrap #nes-svg');
     if (!svgEl) return;
     const date = new Date().toISOString().slice(0, 10);
-    exportSVGAsPNG(svgEl, `igsea_nes_chart_${date}.png`);
+    exportSVGAsPNG(svgEl, `adgsea_nes_chart_${date}.png`);
   });
 
 // ── NES chart toggle (>20 pathways) ──────────────────────────
@@ -218,7 +218,7 @@ function _updateRun() {
   document.getElementById('btn-clear').disabled =  S.running;
 }
 
-// ── Run iGSEA ─────────────────────────────────────────────────
+// ── Run adgsea ─────────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click', async () => {
   if (S.running) return;
 
@@ -234,9 +234,9 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
   _updateRun();
   showProgress(true);
-  setProgress(0, 'Starting', 'Initialising iGSEA…');
+  setProgress(0, 'Starting', 'Initialising adgsea…');
   log(
-    `iGSEA: ${paths.length} pathway(s) · ${nPerms} perms · ` +
+    `adgsea: ${paths.length} pathway(s) · ${nPerms} perms · ` +
     `p=${wt} · engine=${S.engine}`, 'ok'
   );
 
@@ -255,7 +255,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
     });
 
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
-    setProgress(100, 'Done', `iGSEA complete in ${sec}s`);
+    setProgress(100, 'Done', `adgsea complete in ${sec}s`);
     log(`Done: ${results.length} pathway(s) in ${sec}s`, 'ok');
 
     S.results = results;
@@ -265,7 +265,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   } catch (err) {
     if (err.message === 'Aborted') {
       log('Aborted by user', 'warn');
-      setProgress(0, 'Aborted', 'Stopped. Press Run iGSEA to restart.');
+      setProgress(0, 'Aborted', 'Stopped. Press Run adgsea to restart.');
     } else {
       log(`Error: ${err.message}`, 'err');
       setProgress(0, 'Error', err.message);
@@ -376,4 +376,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-log('iGSEA v2.6 ready — load files or click ⚡ Demo', 'ok');
+log('adgsea v2.6 ready — load files or click ⚡ Demo', 'ok');
