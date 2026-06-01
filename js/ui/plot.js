@@ -1,9 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/plot.js  ·  v2.7
-//  Changes from v2.6:
-//  • renderESStats: pKS label always "(perm)" since KS
-//    no longer has a parametric path
-//  • pAD label reflects engine choice (par vs perm)
+//  ui/plot.js  ·  v0.3.0
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -59,7 +55,7 @@ export async function exportAllCurves(results, pathways, geneNames, width = 900)
     const safe = r.name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 80);
     await exportSVGAsPNG(
       svgEl,
-      `adgsea_${String(i + 1).padStart(3, '0')}_${safe}.png`
+      `ingsea_${String(i + 1).padStart(3, '0')}_${safe}.png`
     );
     await _sleep(120);
   }
