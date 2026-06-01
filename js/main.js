@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  main.js  ·  adgsea v2.6
+//  main.js  ·  ingsea v0.3.0
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -32,8 +32,7 @@ const S = {
   abortCtrl:   null
 };
 
-// ── jStat check ──────────────────────────────────────────────
-// ── main.js 中的修改 ──────────────────────────────────────────────
+
 function checkJStat() {
   const badge = document.getElementById('jstat-status');
   if (typeof jStat !== 'undefined') {
@@ -54,8 +53,7 @@ function checkJStat() {
     S.engine = 'permutation';
   }
 }
-// 脚本一旦执行，本地的 jstat.min.js 肯定已经加载完毕（因为 script 标签阻塞特性）
-// 直接同步调用即可：
+
 checkJStat();
 
 
@@ -87,7 +85,7 @@ document.getElementById('btn-dl-one-curve')
     const sel  = document.querySelector('#tbody tr.sel');
     const name = sel?.dataset.name ?? 'curve';
     const safe = name.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
-    exportCurrentCurvePNG(`adgsea_${safe}.png`);
+    exportCurrentCurvePNG(`ingsea_${safe}.png`);
   });
 
 // ── Batch curve PNG export ────────────────────────────────────
@@ -111,7 +109,7 @@ document.getElementById('btn-dl-nes')
     const svgEl = document.querySelector('#nes-chart-wrap #nes-svg');
     if (!svgEl) return;
     const date = new Date().toISOString().slice(0, 10);
-    exportSVGAsPNG(svgEl, `adgsea_nes_chart_${date}.png`);
+    exportSVGAsPNG(svgEl, `ingsea_nes_chart_${date}.png`);
   });
 
 // ── NES chart toggle (>20 pathways) ──────────────────────────
@@ -218,7 +216,7 @@ function _updateRun() {
   document.getElementById('btn-clear').disabled =  S.running;
 }
 
-// ── Run adgsea ─────────────────────────────────────────────────
+// ── Run ingsea ─────────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click', async () => {
   if (S.running) return;
 
@@ -234,9 +232,9 @@ document.getElementById('btn-run').addEventListener('click', async () => {
 
   _updateRun();
   showProgress(true);
-  setProgress(0, 'Starting', 'Initialising adgsea…');
+  setProgress(0, 'Starting', 'Initialising ingsea…');
   log(
-    `adgsea: ${paths.length} pathway(s) · ${nPerms} perms · ` +
+    `ingsea: ${paths.length} pathway(s) · ${nPerms} perms · ` +
     `p=${wt} · engine=${S.engine}`, 'ok'
   );
 
@@ -255,7 +253,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
     });
 
     const sec = ((performance.now() - t0) / 1000).toFixed(1);
-    setProgress(100, 'Done', `adgsea complete in ${sec}s`);
+    setProgress(100, 'Done', `ingsea complete in ${sec}s`);
     log(`Done: ${results.length} pathway(s) in ${sec}s`, 'ok');
 
     S.results = results;
@@ -265,7 +263,7 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   } catch (err) {
     if (err.message === 'Aborted') {
       log('Aborted by user', 'warn');
-      setProgress(0, 'Aborted', 'Stopped. Press Run adgsea to restart.');
+      setProgress(0, 'Aborted', 'Stopped. Press Run ingsea to restart.');
     } else {
       log(`Error: ${err.message}`, 'err');
       setProgress(0, 'Error', err.message);
@@ -376,4 +374,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-log('adgsea v2.6 ready — load files or click ⚡ Demo', 'ok');
+log('ingsea v2.6 ready — load files or click ⚡ Demo', 'ok');
