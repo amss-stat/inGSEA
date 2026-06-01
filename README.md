@@ -91,7 +91,7 @@ Chrome is strongly recommended for best performance.
 
 ## References
 
-1. *[Our paper — citation to be added upon publication]*
+> 1. Zhang, Q., & Li, Q. (2026). *A rotated multivariate linear mixed model for dual large-scale genome-wide association study* (Submitted).
 2. Mootha VK, *et al.* (2003). PGC-1α-responsive genes involved in oxidative
    phosphorylation are coordinately downregulated in human diabetes.
    *Nature Genetics*, 34(3), 267–273.
