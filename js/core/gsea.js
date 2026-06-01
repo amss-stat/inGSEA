@@ -1,6 +1,3 @@
-// ═══════════════════════════════════════════════════════════
-//  core/gsea.js  ·  v2.9 (Original GSEA Empirical FDR)
-// ═══════════════════════════════════════════════════════════
 'use strict';
 
 import {
@@ -14,7 +11,6 @@ import { pvalGG } from './distributions.js';
 const MAX_PERMS       = 2000;
 const TARGET_CHUNK_MS = 16;
 
-// ── Helper: 二分查找用于快速统计大于等于/小于等于某个值的数量 ──
 function countGTE(sortedArr, val) {
   let l = 0, r = sortedArr.length - 1;
   while (l <= r) {
@@ -184,11 +180,10 @@ export async function runGSEA(opts) {
     pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  // ── 6. 提取 GSEA 经验 FDR 需要的所有分布数据 ──────────────
+  // ── 6. GSEA FDR ──────────────
   onProgress(93, 'FDR', 'Building Global NES Distributions…');
   await _yield();
 
-  // 为每个通路计算均值，用于将 Null ES 转化为 Null NES
   const allPermNES_pos = [];
   const allPermNES_neg = [];
   const allPermNES_AD  = [];
@@ -213,7 +208,6 @@ export async function runGSEA(opts) {
     const meanNegKS = countNegKS > 0 ? Math.abs(sumNegKS / countNegKS) : 0;
     const meanAD    = sumAD / nPerms;
 
-    // 构建全排列背景下的 NES
     for (let j = 0; j < nPerms; j++) {
       const ks = nullKS[pi][j];
       if (ks >= 0) { if (meanPosKS > 0) allPermNES_pos.push(ks / meanPosKS); }
@@ -222,7 +216,6 @@ export async function runGSEA(opts) {
       if (meanAD > 0) allPermNES_AD.push(nullAD[pi][j] / meanAD);
     }
 
-    // 收集真实观测结果的 NES
     const e = empArr[pi];
     if (e.nes >= 0) obsNES_pos.push(e.nes);
     else obsNES_neg.push(e.nes);
@@ -230,7 +223,6 @@ export async function runGSEA(opts) {
     if (e.nes_ad >= 0) obsNES_AD.push(e.nes_ad);
   }
 
-  // 对全分布排序，以便后续进行快速二分查找
   allPermNES_pos.sort((a, b) => a - b);
   allPermNES_neg.sort((a, b) => a - b);
   allPermNES_AD.sort((a, b) => a - b);
@@ -239,7 +231,6 @@ export async function runGSEA(opts) {
   obsNES_neg.sort((a, b) => a - b);
   obsNES_AD.sort((a, b) => a - b);
 
-  // ── 7. 计算原版 GSEA 经验 FDR ───────────────────────────
   onProgress(97, 'FDR', 'Computing Empirical FDRs…');
   await _yield();
 
@@ -262,12 +253,10 @@ export async function runGSEA(opts) {
   const results = pathways.map((p, pi) => {
     const e = empArr[pi];
     
-    // 计算 KS 对应的经验 FDR (区分正负)
     const fdr_ks = e.nes >= 0 
       ? getFDR(e.nes, true, obsNES_pos, allPermNES_pos)
       : getFDR(e.nes, false, obsNES_neg, allPermNES_neg);
 
-    // 计算 AD 对应的经验 FDR (恒为正向)
     const fdr_ad = getFDR(e.nes_ad, true, obsNES_AD, allPermNES_AD);
 
     return {
@@ -289,7 +278,6 @@ export async function runGSEA(opts) {
       pKS_par: null,
       pAD_par: pAD_par_arr[pi],
 
-      // 分别输出基于 NES 和 NES_AD 计算出的原始机制 FDR
       fdr_ks:  fdr_ks,
       fdr_ad:  fdr_ad,
 
