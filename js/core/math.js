@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  core/math.js  ·  v2.4
+//  core/math.js  ·  v0.3.0
 //  Changes:
 //  • calcSNR: accepts optional Float32Array output (faster sort)
 //  • calcGSEAStats: accepts weight exponent p (default 1)
@@ -137,35 +137,6 @@ export function cauchyCombine(...pvals) {
   return 0.5 - Math.atan(s) / Math.PI;
 }
 
-/**
- * Benjamini–Hochberg FDR (step-up procedure).
- * Returns Float64Array of q-values aligned to input order.
- * All q-values are clamped to [0, 1].
- *
- * Algorithm:
- *   Sort p ascending → p(1) ≤ p(2) ≤ … ≤ p(m)
- *   BH q(i) = min_{j≥i} { p(j) · m / j }   (cumulative min from right)
- */
-export function bhFDR(pvals) {
-  const n   = pvals.length;
-  if (n === 0) return new Float64Array(0);
-  if (n === 1) return Float64Array.from([Math.min(pvals[0], 1)]);
-
-  const idx = Array.from({ length: n }, (_, i) => i);
-  idx.sort((a, b) => pvals[a] - pvals[b]);
-
-  const q = new Float64Array(n);
-  let minQ = 1.0;
-
-  for (let r = n - 1; r >= 0; r--) {
-    const i  = idx[r];
-    // rank is r+1 (1-based); BH formula: p(r+1) * m / (r+1)
-    const qi = Math.min(pvals[i] * n / (r + 1), 1.0);
-    if (qi < minQ) minQ = qi;
-    q[i] = minQ;
-  }
-  return q;
-}
 
 /** Fisher-Yates shuffle (TypedArray-compatible). */
 export function shuffle(arr) {
@@ -217,15 +188,7 @@ export function empP_AD(obsAD, nullAD, nPerms) {
   return (c + 1) / (nPerms + 1);
 }
 
-// 在 core/math.js 中添加或修改
 
-/**
- * 核心：计算 GSEA 风格的 FDR (基于全局 NES 分布)
- * @param {number[]} obsNES - 观测到的 NES 数组 (nP)
- * @param {Float64Array[]} nullNESMat - 所有置换的 NES 矩阵 [nP][nPerms]
- * @param {boolean} twoSided - 对于 KS 需要分正负，对于 AD 只需要单边
- */
-/**
  * GSEA-style FDR with isotonic correction.
  * Subramanian et al. 2005, Supplementary Methods.
  *
@@ -554,70 +517,4 @@ export function permFDR(obsPCauchy, nullKS, nullAD, nPerms) {
   }
 
   return fdr;
-}
-
-
-/**
- * Storey (2002) q-value.
- *
- * Estimates π₀ (proportion of true nulls) from the p-value
- * distribution, then applies a π₀-weighted BH correction.
- *
- * π₀ estimation strategy:
- *   π₀(λ) = #{p > λ} / (m × (1 − λ))
- *   Evaluate at λ ∈ {0.05, 0.10, …, 0.50}.
- *   Use the estimate at the largest λ where at least
- *   max(5, m×0.10) p-values exceed λ (stability criterion).
- *   If no stable λ found: π₀ = 1 (reduces to BH).
- *
- * For m < 10: always uses π₀ = 1 (too few p-values to
- * estimate π₀ reliably).
- *
- * Monotonicity: q-values are guaranteed non-decreasing with
- * p-values via right-to-left running minimum (same as BH).
- *
- * @param  {number[]}      pvals  raw p-values (any order)
- * @returns {Float64Array}        q-values aligned to input
- */
-export function storeyQ(pvals) {
-  const m = pvals.length;
-  if (m === 0) return new Float64Array(0);
-  if (m === 1) return Float64Array.from([Math.min(pvals[0], 1)]);
-
-  // ── Step 1: estimate π₀ ──────────────────────────────────
-  let pi0 = 1.0;
-
-  if (m >= 10) {
-    const lambdas = [0.05, 0.10, 0.15, 0.20, 0.25,
-                     0.30, 0.35, 0.40, 0.45, 0.50];
-    const minAbove = Math.max(5, Math.floor(m * 0.10));
-
-    // Scan from largest λ downward; take first stable estimate
-    for (let li = lambdas.length - 1; li >= 0; li--) {
-      const lam   = lambdas[li];
-      const above = pvals.filter(p => p > lam).length;
-      if (above < minAbove) continue;
-      pi0 = Math.min(above / (m * (1 - lam)), 1.0);
-      break;
-    }
-    // If no stable λ found, pi0 remains 1.0 (conservative = BH)
-  }
-
-  // ── Step 2: π₀-weighted BH ───────────────────────────────
-  // q(i) = min_{j ≥ i} { π₀ × m × p(j) / j }   (1-based rank j)
-  // Right-to-left running minimum ensures monotonicity.
-  const idx = Array.from({ length: m }, (_, i) => i);
-  idx.sort((a, b) => pvals[a] - pvals[b]);   // ascending p-value
-
-  const q    = new Float64Array(m);
-  let   minQ = 1.0;
-
-  for (let r = m - 1; r >= 0; r--) {
-    const i  = idx[r];
-    const qi = Math.min(pi0 * pvals[i] * m / (r + 1), 1.0);
-    if (qi < minQ) minQ = qi;
-    q[i] = minQ;
-  }
-
-  return q;
 }
