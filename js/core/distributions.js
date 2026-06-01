@@ -1,12 +1,3 @@
-// ═══════════════════════════════════════════════════════════
-//  core/distributions.js  ·  v2.9 (Performance Optimized)
-//
-//  Key Optimizations:
-//  • Pre-calculates Math.log(data) to avoid O(Iter * N) redundant logs.
-//  • Subsamples Null Distribution to 400 points (sufficient for GG fit).
-//  • Vectorized-style NegLL: constant terms moved out of loops.
-//  • Reduced starting points and max iterations for Nelder-Mead.
-// ═══════════════════════════════════════════════════════════
 'use strict';
 
 function _js() {
@@ -18,9 +9,9 @@ function _js() {
 // ── Nelder-Mead simplex optimizer ────────────────────────────
 export function nelderMead(f, x0, opts = {}) {
   const {
-    maxIter  = 1000, // 降低默认迭代上限
+    maxIter  = 1000,
     maxCalls = 5000,
-    tol      = 1e-6, // 调整容差到合理范围
+    tol      = 1e-6,
     alpha    = 1.0,
     gamma    = 2.0,
     rho      = 0.5,
@@ -77,13 +68,6 @@ export function nelderMead(f, x0, opts = {}) {
   return { x: s[0], fval: fv[0] };
 }
 
-// ── Optimized Generalized Gamma Likelihood ───────────────────
-
-/**
- * 优化后的负对数似然函数
- * @param {Array} par - [mu, logSigma, Q]
- * @param {Array} logData - 预计算好的对数数组
- */
 function ggNegLL_Optimized(par, logData, sumLogData) {
   const mu    = par[0];
   const sigma = Math.exp(par[1]);
@@ -93,7 +77,6 @@ function ggNegLL_Optimized(par, logData, sumLogData) {
 
   if (sigma < 1e-7 || sigma > 200) return 1e15;
 
-  // 情况 A: 接近对数正态 (Q -> 0)
   if (Math.abs(Q) < 1e-6) {
     let sumZ2 = 0;
     const invSigma = 1.0 / sigma;
@@ -101,16 +84,13 @@ function ggNegLL_Optimized(par, logData, sumLogData) {
       const z = (logData[i] - mu) * invSigma;
       sumZ2 += z * z;
     }
-    // 包含 sumLogData 以确保分段函数在 Q=0 处的严格连续
     return n * (Math.log(sigma) + 0.9189385332) + sumLogData + 0.5 * sumZ2;
   }
 
-  // 情况 B: 广义伽马 (Q != 0)
   const k = 1.0 / (Q * Q);
   const invSigma = 1.0 / sigma;
   const kQ = k * Q;
   
-  // 修正后的常数项：确保与 Log-normal 分支逻辑一致
   const term1 = n * (js.gammaln(k) + Math.log(sigma) - Math.log(Math.abs(Q)) - k * Math.log(k));
   
   let sumExpPart = 0;
@@ -123,7 +103,6 @@ function ggNegLL_Optimized(par, logData, sumLogData) {
     sumWPart   += kQ * w;
   }
 
-  // 完整公式：sumLogData + term1 - sumWPart + sumExpPart
   return sumLogData + term1 - sumWPart + sumExpPart;
 }
 
@@ -150,16 +129,12 @@ export function ggSurvival(x, mu, sigma, Q) {
   return Math.max(0, Math.min(1, p));
 }
 
-// ── Fitting Logic ────────────────────────────────────────────
 
 export function fitGenGamma(data) {
-  // 1. 仅过滤非正值（MLE 拟合要求数据必须大于 0）
   const pos = data.filter(v => v > 1e-12);
   if (pos.length < 10) return { ok: false };
 
-  // --- 下采样逻辑已删除，现在使用全部 pos 数据 ---
 
-  // 2. 预计算所有数据的对数（依然保留，因为这是纯数学优化，不影响结果）
   const logData = pos.map(v => Math.log(v));
   const sumLogData = logData.reduce((a, b) => a + b, 0);
   
@@ -168,7 +143,6 @@ export function fitGenGamma(data) {
   const varS = logData.reduce((s, v) => s + (v - muS) ** 2, 0) / (n - 1);
   const sigS = Math.max(Math.sqrt(varS), 1e-4);
 
-  // 3. 起点设置
   const starts = [
     [muS, Math.log(sigS), -1.0],
     [muS, Math.log(sigS),  0.8]
@@ -192,9 +166,7 @@ export function fitGenGamma(data) {
   return { mu, sigma, Q, ok: true };
 }
 
-/**
- * 接口函数：计算参数化 p 值
- */
+
 export function pvalGG(obsAD, nullAD, empP) {
   try {
     const n = nullAD.length;
