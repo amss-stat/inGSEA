@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/table.js  ·  v2.8 (Dual FDR Edition)
+//  ui/table.js  ·  v0.3.0
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -94,7 +94,6 @@ function _cell(id, r, rank, url) {
     p == null ? '—' :
     Math.abs(p) < 0.001 ? p.toExponential(2) : p.toFixed(4);
 
-  // GSEA 风格显著性样式：FDR < 0.05 强显著 (fsig)，FDR < 0.25 值得关注 (fwarn)
   const fc = f => 
     f == null ? '' :
     f < 0.05  ? 'fsig' : 
@@ -118,13 +117,13 @@ function _cell(id, r, rank, url) {
     case 'nes':
       return `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`;
 
-    case 'fdr_ks': // 新增列渲染
+    case 'fdr_ks':
       return `<td class="fv ${fc(r.fdr_ks)}">${fp(r.fdr_ks)}</td>`;
 
     case 'nes_ad':
       return `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`;
 
-    case 'fdr_ad': // 新增列渲染
+    case 'fdr_ad':
       return `<td class="fv ${fc(r.fdr_ad)}">${fp(r.fdr_ad)}</td>`;
 
     case 'pKS':
