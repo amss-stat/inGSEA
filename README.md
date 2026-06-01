@@ -91,22 +91,11 @@ Chrome is strongly recommended for best performance.
 
 ## References
 
-> 1. Zhang, Q., & Li, Q. (2026). *A rotated multivariate linear mixed model for dual large-scale genome-wide association study* (Submitted).
-2. Mootha VK, *et al.* (2003). PGC-1α-responsive genes involved in oxidative
-   phosphorylation are coordinately downregulated in human diabetes.
-   *Nature Genetics*, 34(3), 267–273.
-   [doi:10.1038/ng1180](https://doi.org/10.1038/ng1180)
-3. Subramanian A, *et al.* (2005). Gene set enrichment analysis: a
-   knowledge-based approach for interpreting genome-wide expression profiles.
-   *PNAS*, 102(43), 15545–15550.
-   [doi:10.1073/pnas.0506580102](https://doi.org/10.1073/pnas.0506580102)
-4. Liberzon A, Subramanian A, Pinchback R, Thorvaldsdóttir H, Tamayo P &
-   Mesirov JP (2011). Molecular Signatures Database (MSigDB) 3.0.
-   *Bioinformatics*, 27(12), 1739–1740.
-   [doi:10.1093/bioinformatics/btr260](https://doi.org/10.1093/bioinformatics/btr260)
-5. Liberzon A, *et al.* (2015). The Molecular Signatures Database (MSigDB)
-   hallmark gene set collection. *Cell Systems*, 1(6), 417–425.
-   [doi:10.1016/j.cels.2015.12.004](https://doi.org/10.1016/j.cels.2015.12.004)
+1. Zhang, Q., & Li, Q. (2026). A rotated multivariate linear mixed model for dual large-scale genome-wide association study. (*Submitted*).
+2. Mootha VK, *et al.* (2003). PGC-1α-responsive genes involved in oxidative phosphorylation are coordinately downregulated in human diabetes. *Nature Genetics*, 34(3), 267–273.
+3. Subramanian A, *et al.* (2005). Gene set enrichment analysis: a knowledge-based approach for interpreting genome-wide expression profiles. *PNAS*, 102(43), 15545–15550.
+4. Liberzon A, Subramanian A, Pinchback R, Thorvaldsdóttir H, Tamayo P & Mesirov JP (2011). Molecular Signatures Database (MSigDB) 3.0. *Bioinformatics*, 27(12), 1739–1740.
+5. Liberzon A, *et al.* (2015). The Molecular Signatures Database (MSigDB) hallmark gene set collection. *Cell Systems*, 1(6), 417–425.
 
 ---
 
