@@ -1,32 +1,27 @@
-https://amss-stat.github.io/adGSEA/
+https://amss-stat.github.io/inGSEA/
 
-# adGSEA — Improved Gene Set Enrichment Analysis
+# inGSEA — Improved Gene Set Enrichment Analysis Using a Weighted Integral Statistic
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.4-green.svg)]()
+[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)]()
 
-A web-based implementation of the adGSEA framework, which extends classical
+A web-based implementation of the inGSEA framework, which extends classical
 Gene Set Enrichment Analysis with an Anderson-Darling enrichment score and
 Cauchy combination test for improved statistical power and robustness.
-
-> **Note:** The accompanying manuscript is currently under review.
-> Citation information will be added upon publication.
 
 ---
 
 ## Overview
 
 Standard GSEA has limited power when pathways exhibit heterogeneous or
-non-concordant expression patterns. adGSEA addresses this by:
+non-concordant expression patterns. inGSEA addresses this by:
 
-- Integrating an **Anderson-Darling (AD) based enrichment score** that
-  enhances detection of sparse and bidirectional signals
-- Combining KS and AD statistics via a **Cauchy combination test** for
+- Adopting an **Anderson-Darling (AD) enrichment score** that
+  enhances detection of complex signals, paticularly sparse and bidirectional ones
+- Combining AD and KS tests via a **Cauchy combination test** for
   robustness across diverse expression patterns
 - Approximating permutation null distributions with a **generalised gamma
   distribution**, substantially reducing computational cost
-- Providing strict **false positive rate control** alongside superior
-  statistical power (validated by extensive simulation)
 
 All computation runs entirely in the browser — no data is uploaded to any
 server.
@@ -35,7 +30,7 @@ server.
 
 ## Live Demo
 
-[**Launch adGSEA →**](https://amss-stat.github.io/adGSEA)
+[**Launch inGSEA →**](https://amss-stat.github.io/inGSEA)
 
 A built-in demo dataset (200 genes × 20 samples, 3 synthetic pathways) is
 available via the **⚡ Load demo dataset** button.
@@ -64,12 +59,12 @@ GMT files can be downloaded from
 5. Choose a **statistical engine**:
    - *Parametric Approximation* — generalised gamma null fit (faster)
    - *Permutation only* — empirical p-values only
-6. Click **▶ Run adGSEA**
+6. Click **▶ Run inGSEA**
 
 ### Output
 
-- Sortable results table with NES, NES-AD, p-values, and BH-adjusted FDR
-- Interactive enrichment score walk plot (zoom, pan, hover)
+- Sortable results table with NES, NES-AD, p-values, and FDR values
+- Interactive enrichment plot (zoom, pan, hover)
 - NES bar chart overview (when > 10 pathways)
 - CSV export and PNG export of enrichment curves
 
@@ -81,9 +76,9 @@ GMT files can be downloaded from
 |-----------|-------------|
 | Ranking metric | Welch signal-to-noise ratio |
 | KS enrichment score | Weighted running sum (weight exponent *p*, default 1) |
-| AD statistic | Integral of squared running sum over rank fractions |
+| AD enrichment score | Integral of squared running sum over rank fractions |
 | Null approximation | Generalised gamma MLE fit to permutation null |
-| p-value combination | Cauchy combination test (Liu & Xie 2020) |
+| p-value combination | Cauchy combination test |
 | Multiple testing | Benjamini-Hochberg FDR |
 
 ---
@@ -91,7 +86,6 @@ GMT files can be downloaded from
 ## Browser Compatibility
 
 Chrome is strongly recommended for best performance.
-Firefox and Edge are supported. Safari may be slower for large datasets.
 
 ---
 
@@ -118,7 +112,7 @@ Firefox and Edge are supported. Safari may be slower for large datasets.
 
 ## License
 
-The adGSEA source code is released under the
+The inGSEA source code is released under the
 [MIT License](LICENSE).
 
 GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for
@@ -130,4 +124,4 @@ Institute of MIT and Harvard).
 ## Contact
 
 For questions or bug reports, please open an issue on
-[GitHub](https://github.com/amss-stat/adGSEA/issues).
+[GitHub](https://github.com/amss-stat/inGSEA/issues).
