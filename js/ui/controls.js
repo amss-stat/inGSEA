@@ -1,8 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  ui/controls.js  ·  v2.7
-//  Changes from v2.6:
-//  • CSV export: removed pKS_par column (always null)
-//  • CSV header clarifies pKS is always permutation-based
+//  ui/controls.js  ·  v0.3.0
 // ═══════════════════════════════════════════════════════════
 'use strict';
 
@@ -147,7 +144,7 @@ export function downloadCSV(results, engine) {
 
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.setAttribute('download', `adgsea_results.csv`);
+  link.setAttribute('download', `ingsea_results.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
