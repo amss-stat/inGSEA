@@ -91,7 +91,7 @@ Chrome is strongly recommended for best performance.
 
 ## References
 
-1. Zhang, Q., & Li, Q. (2026). A rotated multivariate linear mixed model for dual large-scale genome-wide association study. *bioRxiv*, doi: 
+1. Zhang, Q., & Li, Q. (2026). A rotated multivariate linear mixed model for dual large-scale genome-wide association study. *bioRxiv*, doi: https://doi.org/10.64898/2026.06.02.729106.
 2. Mootha VK, *et al.* (2003). PGC-1α-responsive genes involved in oxidative phosphorylation are coordinately downregulated in human diabetes. *Nature Genetics*, 34(3), 267–273.
 3. Subramanian A, *et al.* (2005). Gene set enrichment analysis: a knowledge-based approach for interpreting genome-wide expression profiles. *PNAS*, 102(43), 15545–15550.
 4. Liberzon A, Subramanian A, Pinchback R, Thorvaldsdóttir H, Tamayo P & Mesirov JP (2011). Molecular Signatures Database (MSigDB) 3.0. *Bioinformatics*, 27(12), 1739–1740.
