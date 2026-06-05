@@ -32,7 +32,6 @@ const S = {
   abortCtrl:   null
 };
 
-
 function checkJStat() {
   const badge = document.getElementById('jstat-status');
   if (typeof jStat !== 'undefined') {
@@ -56,22 +55,12 @@ function checkJStat() {
 
 checkJStat();
 
-
 // ── Mode tabs ─────────────────────────────────────────────────
 setupModeTabs();
 
 // ── Engine selector ───────────────────────────────────────────
 document.getElementById('sel-engine').addEventListener('change', e => {
   S.engine = e.target.value;
-});
-
-// ── Extended columns toggle ───────────────────────────────────
-document.getElementById('chk-extra').addEventListener('change', e => {
-  const show = e.target.checked;
-  document.getElementById('rt').classList.toggle('show-ext', show);
-  // Issue (2): FDR note only visible when extended columns shown AND >10 pathways
-  document.getElementById('fdr-note').style.display =
-    (show && S.showFDR) ? 'block' : 'none';
 });
 
 // ── Reset zoom ────────────────────────────────────────────────
@@ -134,12 +123,6 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   document.getElementById('prog-wrap').style.display         = 'none';
   document.getElementById('fdr-note').style.display          = 'none';
   document.getElementById('tbody').innerHTML = '';
-  // Reset extended columns checkbox
-  const chk = document.getElementById('chk-extra');
-  if (chk.checked) {
-    chk.checked = false;
-    document.getElementById('rt').classList.remove('show-ext');
-  }
   log('Results cleared', 'ok');
 });
 
@@ -309,15 +292,11 @@ function _renderResults(results) {
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('res-panel').style.display   = 'block';
 
-  // Issue (5): pathway count only
   document.getElementById('res-count').textContent =
     `${results.length} pathway${results.length !== 1 ? 's' : ''}`;
 
-  // Issue (2): FDR note hidden by default; appears only when
-  // extended columns are toggled on AND >10 pathways
-  document.getElementById('fdr-note').style.display = 'none';
+  document.getElementById('fdr-note').style.display = S.showFDR ? 'block' : 'none';
 
-  // Issue (3): NES chart — shown when >10 pathways
   const nesSection   = document.getElementById('nes-chart-section');
   const nesBody      = document.getElementById('nes-chart-body');
   const nesToggleBtn = document.getElementById('btn-toggle-nes');
@@ -326,7 +305,6 @@ function _renderResults(results) {
     nesSection.style.display = 'block';
     drawNESChart(results, document.getElementById('nes-chart-wrap'));
 
-    // Issue (3): collapse by default when >20 pathways
     if (results.length > 20) {
       nesBody.style.display      = 'none';
       nesToggleBtn.style.display = 'inline-flex';
@@ -356,13 +334,11 @@ let _resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
-    // Redraw NES chart if visible
     if (S.results && S.results.length > 10) {
       const wrap = document.getElementById('nes-chart-wrap');
       if (wrap && document.getElementById('nes-chart-body').style.display !== 'none')
         drawNESChart(S.results, wrap);
     }
-    // Redraw selected enrichment curve
     if (!S.results) return;
     const sel = document.querySelector('#tbody tr.sel');
     if (!sel) return;
