@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>inGSEA · Improved Gene Set Enrichment Analysis</title>
-  <!-- Issue: favicon 404 fix -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='3' fill='none' stroke='%231a5fa8' stroke-width='1.5'/><polyline points='4,22 9,14 14,17.5 21,7 28,12' stroke='%231a5fa8' stroke-width='1.8' fill='none'/><circle cx='21' cy='7' r='2.2' fill='%23d9480f'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -29,18 +28,18 @@
   </svg>
   <div class="hdr-brand">
     <div class="hdr-title">inGSEA</div>
-    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v2.6</div>
+    <div class="hdr-sub">Improved Gene Set Enrichment Analysis · v0.3.0</div>
   </div>
   <nav class="hdr-nav">
-    <span class="jstat-bge" id="jstat-status">jStat…</span>
+    <span class="jstat-badge" id="jstat-status">jStat…</span>
     <span class="browser-note"
           title="Chrome provides significantly faster JS engine performance for inGSEA">
       🌐 Chrome recommended
     </span>
     <a href="https://github.com/amss-stat/inGSEA"
-       target="_blank" rel="noopener" class="hdr-bge">GitHub</a>
+       target="_blank" rel="noopener" class="hdr-badge">GitHub</a>
   </nav>
-</heer>
+</header>
 
 <div class="layout">
 <aside class="lp">
@@ -68,10 +67,10 @@
       <div class="dz-name"  id="fn-path"></div>
       <div class="dz-stats" id="st-path"></div>
     </div>
-    <div class="gmt-downlo-note">
+    <div class="gmt-download-note">
       <a href="https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp"
          target="_blank" rel="noopener">
-        ↗ Downlo GMT files from MSigDB
+        ↗ Download GMT files from MSigDB
       </a>
     </div>
   </div>
@@ -102,7 +101,6 @@
              value="1" min="0" max="3" step="0.5">
     </div>
 
-    <!-- Issue: label not associated — use div inste of label -->
     <div class="fg">
       <div class="fl">Pathway selection</div>
       <div class="pm-tabs" role="tablist">
@@ -159,7 +157,7 @@
 
   <div class="sec sec-demo">
     <div class="sec-lbl">Quick Start</div>
-    <button class="btn-secondary full" id="btn-demo">⚡ Lo demo dataset</button>
+    <button class="btn-secondary full" id="btn-demo">⚡ Load demo dataset</button>
     <p class="demo-note">
       200 genes · 20 samples (10/10)<br>
       3 synthetic pathways (up / down / mixed)
@@ -185,7 +183,7 @@
                 stroke-linejoin="round" stroke-linecap="round"/>
       <circle cx="42" cy="14" r="4" fill="#d9480f"/>
     </svg>
-    <h2 class="empty-h">inGSEA — Rey to analyse</h2>
+    <h2 class="empty-h">inGSEA — Ready to analyse</h2>
     <p class="empty-p">
       Load expression matrix &amp; gene sets,<br>
       configure parameters, then press <strong>Run inGSEA</strong>.<br><br>
