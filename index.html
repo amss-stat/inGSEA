@@ -198,10 +198,6 @@
         <span class="res-count" id="res-count"></span>
       </div>
       <div class="res-toolbar-right">
-        <!-- Issue: nested input in label — correctly associated -->
-        <label class="toggle-lbl" for="chk-extra">
-          <input type="checkbox" id="chk-extra"> Extended columns
-        </label>
         <button class="btn-secondary btn-sm" id="btn-dl">⬇ Export CSV</button>
         <button class="btn-secondary btn-sm" id="btn-dl-curves"
                 title="Export all enrichment score curves as PNG images">
@@ -210,7 +206,7 @@
       </div>
     </div>
 
-    <!-- FDR note: hidden by default, shown when extended + >10 pathways -->
+    <!-- FDR note: shown when >10 pathways -->
     <div class="fdr-note" id="fdr-note" style="display:none">
       <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5)
       when most pathways are null — this is expected and statistically correct.
