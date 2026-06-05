@@ -89,10 +89,11 @@ export function setRunEnabled(v) {
   document.getElementById('btn-run').disabled = !v;
 }
 
-
 // ── CSV export ───────────────────────────────────────────────
 export function downloadCSV(results, engine) {
   if (!results?.length) return;
+
+  const pAdHeader = engine === 'parametric' ? 'p_AD_par' : 'p_AD_perm';
 
   const hdr = [
     '#',           // rank
@@ -101,12 +102,10 @@ export function downloadCSV(results, engine) {
     'NES',         // nes
     'NES_AD',      // nes_ad
     'p_KS',        // pKS
-    'p_AD',        // pAD
+    pAdHeader,     // pAD (dynamic)
     'p_Cauchy',    // pCauchy
     'FDR_KS',      // fdr_ks
-    'FDR_AD',      // fdr_ad
-    'pAD_perm',    // pAD_emp
-    'pAD_par'      // pAD_par
+    'FDR_AD'       // fdr_ad
   ];
 
   const fp = v =>
@@ -131,9 +130,7 @@ export function downloadCSV(results, engine) {
       fp(r.pAD),           // p_AD
       fp(r.pCauchy),       // p_Cauchy
       fp(r.fdr_ks),        // FDR_KS
-      fp(r.fdr_ad),        // FDR_AD
-      fp(r.pAD_emp),       // pAD (perm)
-      fp(r.pAD_par)        // pAD (par)
+      fp(r.fdr_ad)         // FDR_AD
     ];
     
     rows.push(row.join(','));
