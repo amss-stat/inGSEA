@@ -189,8 +189,7 @@ export function empP_AD(obsAD, nullAD, nPerms) {
 }
 
 
- * GSEA-style FDR with isotonic correction.
- * Subramanian et al. 2005, Supplementary Methods.
+/** GSEA-style FDR with isotonic correction.
  *
  * For positive NES threshold t:
  *   phiNull(t) = #{null NES >= t AND >= 0} / #{null NES >= 0}
