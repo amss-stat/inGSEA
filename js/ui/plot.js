@@ -79,8 +79,8 @@ function _render() {
 function _renderInto(result, pathways, geneNames, container, W, zoom) {
   W = Math.max(W || 680, 400);
 
-  const pw   = W - M.l - M.r;
-  const ph   = SVG_H - M.t - M.b - M.hitH - 6;
+  const pw    = W - M.l - M.r;
+  const ph    = SVG_H - M.t - M.b - M.hitH - 6;
   const curve = result.curve;
   const nG    = curve.length;
   const ord   = result.obsOrd;
@@ -121,7 +121,6 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
   pathD += ` L${_f(toX(r1))},${_f(toY(curve[r1]))}`;
   fillD += ` L${_f(toX(r1))},${_f(toY(curve[r1]))} L${_f(toX(r1))},${_f(y0)} Z`;
 
-  // Y-axis ticks
   const ticks   = Array.from({ length: 6 }, (_, k) => yMin + yR * k / 5);
   const tickSVG = ticks.map(v => {
     const y = _f(toY(v));
@@ -132,7 +131,6 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
           text-anchor="end" fill="#8090a8" font-size="9.5">${v.toFixed(2)}</text>`;
   }).join('');
 
-  // Gene-hit strips
   const pathway = pathways.find(p => p.name === result.name);
   const mask    = pathway?.mask ?? null;
   const hitY    = M.t + ph + 6;
@@ -146,7 +144,6 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
         stroke="${lineC}" stroke-width="1.1" opacity="0.65" fill="none"/>`;
   }
 
-  // Peak marker
   let peakSVG = '';
   if (pkIdx >= r0 && pkIdx <= r1) {
     const px = _f(toX(pkIdx)), py = _f(toY(curve[pkIdx]));
@@ -174,12 +171,10 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
     </clipPath>
   </defs>
 
-  <!-- Background -->
   <rect width="${W}" height="${SVG_H}" fill="#fafbfc"/>
   <rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"
         fill="white" stroke="#dde2ea" stroke-width="0.8"/>
 
-  <!-- Grid + Y ticks -->
   ${tickSVG}
   ${[1,2,3,4].map(k => {
     const x = _f(M.l + pw * k / 5);
@@ -187,20 +182,16 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
       stroke="#e4e8ee" stroke-width="0.7" stroke-dasharray="3,4"/>`;
   }).join('')}
 
-  <!-- Zero line -->
   <line x1="${M.l}" y1="${_f(y0)}" x2="${M.l+pw}" y2="${_f(y0)}"
         stroke="#bbc4d0" stroke-width="0.9"/>
 
-  <!-- Fill + curve -->
   <path d="${fillD}" fill="${fillC}" clip-path="url(#cp)"/>
   <path id="es-path" d="${pathD}" fill="none" stroke="${lineC}"
         stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"
         clip-path="url(#cp)"/>
 
-  <!-- Peak marker -->
   ${peakSVG}
 
-  <!-- Gene-hit strip -->
   <rect x="${M.l}" y="${hitY}" width="${pw}" height="${M.hitH}"
         fill="#f0f2f6" stroke="#dde2ea" stroke-width="0.6"/>
   ${hitSVG}
@@ -208,18 +199,15 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
         fill="#9aa3b0" font-size="8" font-weight="600"
         letter-spacing=".06em">GENE HITS</text>
 
-  <!-- Axes -->
   <line x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t+ph}"
         stroke="#adb8c4" stroke-width="1.3"/>
   <line x1="${M.l}" y1="${M.t+ph}" x2="${M.l+pw}" y2="${M.t+ph}"
         stroke="#adb8c4" stroke-width="1.3"/>
 
-  <!-- Y-axis title -->
   <text transform="translate(13,${_f(M.t+ph/2)}) rotate(-90)"
         text-anchor="middle" fill="#7a8698"
         font-size="10.5" font-weight="500">Enrichment Score</text>
 
-  <!-- X-axis labels -->
   <text x="${_f(toX(r0))}" y="${hitY+M.hitH+14}"
         text-anchor="start" fill="#7a8698" font-size="9.5">${r0+1}</text>
   <text x="${xMid}" y="${hitY+M.hitH+14}"
@@ -232,17 +220,14 @@ function _renderInto(result, pathways, geneNames, container, W, zoom) {
         text-anchor="middle" fill="#7a8698"
         font-size="11" font-weight="500">Gene rank</text>
 
-  <!-- Zoom range label -->
   <text x="${M.l+pw-2}" y="${M.t+13}" text-anchor="end"
         fill="#a05c07" font-size="8.5" font-style="italic"
         opacity="${isZoomed ? 1 : 0}">${_esc(zoomTxt)}</text>
 
-  <!-- Interaction overlay -->
   <rect id="hover-overlay"
         x="${M.l}" y="${M.t}" width="${pw}" height="${ph}"
         fill="transparent" style="cursor:crosshair"/>
 
-  <!-- Hover indicators -->
   <line id="h-line"
         x1="${M.l}" y1="${M.t}" x2="${M.l}" y2="${M.t+ph}"
         stroke="#1a5fa8" stroke-width="1" stroke-dasharray="3,3"
@@ -417,28 +402,18 @@ export function renderESStats(result, engine, showFDR) {
   const isPar = engine === 'parametric';
 
   const cells = [
-    { l: 'ES',
-      v: result.es.toFixed(4),
-      c: result.es >= 0 ? 'pos' : 'neg' },
-    { l: 'NES',
-      v: result.nes.toFixed(3),
-      c: result.nes >= 0 ? 'pos' : 'neg' },
-    { l: 'NES-AD',
-      v: result.nes_ad.toFixed(3),
-      c: '' },
-    // KS: always permutation-based
-    { l: 'p<sub>KS</sub>&thinsp;(perm)',
-      v: fmt(result.pKS),
-      c: sc(result.pKS) },
-    // AD: label reflects engine choice
-    { l: isPar ? 'p<sub>AD</sub>&thinsp;(par)' : 'p<sub>AD</sub>',
-      v: fmt(result.pAD),
-      c: sc(result.pAD) },
-    { l: 'p<sub>Cauchy</sub>',
-      v: fmt(result.pCauchy),
-      c: sc(result.pCauchy) },
-    ...(showFDR && result.fdr != null
-      ? [{ l: 'FDR (BH)', v: fmt(result.fdr), c: sc(result.fdr) }]
+    { l: 'ES', v: result.es.toFixed(4), c: result.es >= 0 ? 'pos' : 'neg' },
+    { l: 'NES', v: result.nes.toFixed(3), c: result.nes >= 0 ? 'pos' : 'neg' },
+    { l: 'NES-AD', v: result.nes_ad.toFixed(3), c: '' },
+    { l: 'p<sub>KS</sub>', v: fmt(result.pKS), c: sc(result.pKS) },
+    { l: isPar ? '<strong>p<sub>AD</sub>&thinsp;(par)</strong>' : '<strong>p<sub>AD</sub>&thinsp;(perm)</strong>',
+      v: fmt(result.pAD), c: sc(result.pAD) },
+    { l: '<strong>p<sub>Cauchy</sub></strong>', v: fmt(result.pCauchy), c: sc(result.pCauchy) },
+    ...(showFDR && result.fdr_ks != null
+      ? [
+          { l: 'FDR<sub>KS</sub>', v: fmt(result.fdr_ks), c: sc(result.fdr_ks) },
+          { l: '<strong>FDR<sub>AD</sub></strong>', v: fmt(result.fdr_ad), c: sc(result.fdr_ad) }
+        ]
       : []),
     { l: 'Size', v: `${result.size}`, c: '' }
   ];
