@@ -3,33 +3,14 @@
 import {
   calcSNR, rankOrder, calcGSEAStats,
   cauchyCombine, shuffle,
-  calcNES, calcNES_AD, empP_KS, empP_AD
+  calcNES, calcNES_AD, empP_KS, empP_AD,
+  calcGseaFDR
 } from './math.js';
 
 import { pvalGG } from './distributions.js';
 
-const MAX_PERMS       = 2000;
+const MAX_PERMS       = 5000;
 const TARGET_CHUNK_MS = 16;
-
-function countGTE(sortedArr, val) {
-  let l = 0, r = sortedArr.length - 1;
-  while (l <= r) {
-    const m = (l + r) >> 1;
-    if (sortedArr[m] >= val) r = m - 1;
-    else l = m + 1;
-  }
-  return sortedArr.length - l;
-}
-
-function countLTE(sortedArr, val) {
-  let l = 0, r = sortedArr.length - 1;
-  while (l <= r) {
-    const m = (l + r) >> 1;
-    if (sortedArr[m] <= val) l = m + 1;
-    else r = m - 1;
-  }
-  return l;
-}
 
 export async function runGSEA(opts) {
   const {
@@ -146,10 +127,9 @@ export async function runGSEA(opts) {
   if (_ab()) throw new Error('Aborted');
 
   // ── 4. AD parametric fitting (engine = 'parametric') ──────
-  const useParam    = engine === 'parametric';
-  const pKS_arr     = new Array(nP);
-  const pAD_arr     = new Array(nP);
-  const pAD_par_arr = new Array(nP).fill(null);
+  const useParam = engine === 'parametric';
+  const pKS_arr  = new Array(nP);
+  const pAD_arr  = new Array(nP);
 
   for (let pi = 0; pi < nP; pi++) {
     pKS_arr[pi] = empArr[pi].pKS_emp;
@@ -162,12 +142,7 @@ export async function runGSEA(opts) {
       if (_ab()) throw new Error('Aborted');
       const r   = empArr[pi];
       const res = pvalGG(r.oa, nullAD[pi], r.pAD_emp);
-      if (res.fitted) {
-        pAD_par_arr[pi] = res.p;
-        pAD_arr[pi]     = res.p;
-      } else {
-        pAD_arr[pi] = r.pAD_emp;
-      }
+      pAD_arr[pi] = res.fitted ? res.p : r.pAD_emp;
       if (pi % 10 === 0) await _yield();
     }
   } else {
@@ -180,19 +155,20 @@ export async function runGSEA(opts) {
     pCauchy_arr[pi] = cauchyCombine(pKS_arr[pi], pAD_arr[pi]);
   }
 
-  // ── 6. GSEA FDR ──────────────
+  // ── 6. GSEA FDR ───────────────────────────────────────────
   onProgress(93, 'FDR', 'Building Global NES Distributions…');
   await _yield();
 
-  const allPermNES_pos = [];
-  const allPermNES_neg = [];
-  const allPermNES_AD  = [];
-
-  const obsNES_pos = [];
-  const obsNES_neg = [];
-  const obsNES_AD  = [];
+  const obsNES_ks = new Float64Array(nP);
+  const obsNES_ad = new Float64Array(nP);
+  const nullNES_ks = Array.from({ length: nP }, () => new Float64Array(nPerms));
+  const nullNES_ad = Array.from({ length: nP }, () => new Float64Array(nPerms));
 
   for (let pi = 0; pi < nP; pi++) {
+    const e = empArr[pi];
+    obsNES_ks[pi] = e.nes;
+    obsNES_ad[pi] = e.nes_ad;
+
     let sumPosKS = 0, countPosKS = 0;
     let sumNegKS = 0, countNegKS = 0;
     let sumAD = 0;
@@ -210,55 +186,21 @@ export async function runGSEA(opts) {
 
     for (let j = 0; j < nPerms; j++) {
       const ks = nullKS[pi][j];
-      if (ks >= 0) { if (meanPosKS > 0) allPermNES_pos.push(ks / meanPosKS); }
-      else         { if (meanNegKS > 0) allPermNES_neg.push(ks / meanNegKS); }
-      
-      if (meanAD > 0) allPermNES_AD.push(nullAD[pi][j] / meanAD);
+      nullNES_ks[pi][j] = ks >= 0 
+        ? (meanPosKS > 0 ? ks / meanPosKS : 0)
+        : (meanNegKS > 0 ? ks / meanNegKS : 0);
+      nullNES_ad[pi][j] = meanAD > 0 ? nullAD[pi][j] / meanAD : 0;
     }
-
-    const e = empArr[pi];
-    if (e.nes >= 0) obsNES_pos.push(e.nes);
-    else obsNES_neg.push(e.nes);
-    
-    if (e.nes_ad >= 0) obsNES_AD.push(e.nes_ad);
   }
-
-  allPermNES_pos.sort((a, b) => a - b);
-  allPermNES_neg.sort((a, b) => a - b);
-  allPermNES_AD.sort((a, b) => a - b);
-  
-  obsNES_pos.sort((a, b) => a - b);
-  obsNES_neg.sort((a, b) => a - b);
-  obsNES_AD.sort((a, b) => a - b);
 
   onProgress(97, 'FDR', 'Computing Empirical FDRs…');
   await _yield();
 
-  const getFDR = (obsVal, isPositive, obsList, permList) => {
-    if (obsList.length === 0 || permList.length === 0) return 1.0;
-    
-    let probPerm, probObs;
-    if (isPositive) {
-      probPerm = countGTE(permList, obsVal) / permList.length;
-      probObs  = countGTE(obsList, obsVal) / obsList.length;
-    } else {
-      probPerm = countLTE(permList, obsVal) / permList.length;
-      probObs  = countLTE(obsList, obsVal) / obsList.length;
-    }
-    
-    if (probObs === 0) return 1.0;
-    return Math.min(1.0, probPerm / probObs); // FDR最高为1
-  };
+  const fdr_ks_arr = calcGseaFDR(obsNES_ks, nullNES_ks, true);
+  const fdr_ad_arr = calcGseaFDR(obsNES_ad, nullNES_ad, false);
 
   const results = pathways.map((p, pi) => {
     const e = empArr[pi];
-    
-    const fdr_ks = e.nes >= 0 
-      ? getFDR(e.nes, true, obsNES_pos, allPermNES_pos)
-      : getFDR(e.nes, false, obsNES_neg, allPermNES_neg);
-
-    const fdr_ad = getFDR(e.nes_ad, true, obsNES_AD, allPermNES_AD);
-
     return {
       name:    p.name,
       url:     p.url ?? null,
@@ -273,13 +215,8 @@ export async function runGSEA(opts) {
       pAD:     pAD_arr[pi],
       pCauchy: pCauchy_arr[pi],
 
-      pKS_emp: e.pKS_emp,
-      pAD_emp: e.pAD_emp,
-      pKS_par: null,
-      pAD_par: pAD_par_arr[pi],
-
-      fdr_ks:  fdr_ks,
-      fdr_ad:  fdr_ad,
+      fdr_ks:  fdr_ks_arr[pi],
+      fdr_ad:  fdr_ad_arr[pi],
 
       curve:   obsStats[pi].curve,
       obsOrd,
