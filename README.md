@@ -63,7 +63,7 @@ The output table is sortable and includes the following key metrics:
 - **NES / NES-AD:** Normalized Enrichment Scores for KS and AD statistics.
 - **p<sub>KS</sub> / p<sub>AD</sub>:** Significance levels for the KS and AD statistics.
 - **p<sub>Cauchy</sub>:** The aggregated omnibus $p$-value via the Cauchy combination test.
-- **FDR<sub>KS</sub> / FDR<sub>AD</sub>:** Isotonically corrected Benjamini-Hochberg False Discovery Rates, providing strict control for multiple testing globally.
+- **FDR<sub>KS</sub> / FDR<sub>AD</sub>:** False Discovery Rates based on the normalized enrichment scores.
 
 ### Visualizations
 - **Interactive Enrichment Walk Plot:** Visualizes the running sum, peak/integral positions, and individual gene hits. Supports zooming, panning, and high-resolution PNG export.
