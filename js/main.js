@@ -374,4 +374,4 @@ window.addEventListener('resize', () => {
   }, 200);
 }, { passive: true });
 
-log('ingsea v2.6 ready — load files or click ⚡ Demo', 'ok');
+log('ingsea v0.3.0 ready — load files or click ⚡ Demo', 'ok');
