@@ -4,20 +4,20 @@
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)]()
 [![Web Application](https://img.shields.io/badge/Web_App-Live-success.svg)](https://amss-stat.github.io/inGSEA/)
 
-Gene Set Enrichment Analysis (GSEA) is one of the most popular methods for transcriptomic analysis, yet its statistical power is limited when biological pathways exhibit heterogeneous, sparse, or non-concordant (bidirectional) expression patterns. 
+Gene Set Enrichment Analysis (GSEA) is one of the most popular methods for transcriptomic analysis, yet its statistical power is limited when biological pathways exhibit heterogeneous or non-concordant expression patterns. 
 
-**inGSEA (integral-based GSEA)** is a powerful and robust extension of the classical GSEA framework. It introduces a novel enrichment score based on the **Anderson-Darling (AD) weighted integral statistic** and aggregates it with the classic Kolmogorov-Smirnov (KS) statistic via a **Cauchy combination test**. To overcome the computational bottlenecks of permutation testing, inGSEA utilizes a **generalized gamma distribution** to approximate the empirical null. 
+**inGSEA (integral-based GSEA)** is a powerful and robust extension of the classical GSEA framework. It introduces a novel enrichment score based on the Anderson-Darling (AD) weighted integral statistic and aggregates it with the classic Kolmogorov-Smirnov (KS) statistic via a Cauchy combination test. To overcome the computational bottlenecks of permutation testing, inGSEA utilizes a generalized gamma distribution to approximate the empirical null. 
 
-The tool is accessible as a highly optimized, user-friendly, and privacy-preserving web-based software:  
+The tool is accessible as user-friendly, and privacy-preserving web-based software:  
 🌐 **[Launch inGSEA Web Application](https://amss-stat.github.io/inGSEA/)**
 
 ## Key Features
 
-- **Anderson-Darling (AD) Enrichment Score:** Integrates squared deviations over the entire distribution with heavy tail-weighting. This substantially enhances detection power for complex signals, particularly sparse and bidirectional expression patterns missed by standard GSEA.
+- **Anderson-Darling (AD) Enrichment Score:** Integrates squared deviations over the entire distribution with heavy tail-weighting. This substantially enhances detection power for complex signals, particularly sparse and bidirectional expression patterns missed by classic GSEA.
 - **Robust Cauchy Combination:** Aggregates KS and AD statistics to provide robust sensitivity across diverse enrichment scenarios, balancing their complementary strengths.
-- **Fast Generalized Gamma Approximation:** Dramatically reduces the computational burden and improves $p$-value resolution by fitting a generalized gamma distribution to the permutation null, eliminating the need for millions of permutations.
-- **100% Client-Side Privacy:** No data is uploaded to any server. All statistical computations are performed locally within your web browser, ensuring complete confidentiality for sensitive clinical or proprietary genomic data.
-- **Interactive Visualization:** Offers fully interactive enrichment plots. Hovering over or clicking specific segments reveals individual genes and their rank metrics, bridging the gap between statistical significance and biological interpretation.
+- **Fast Generalized Gamma Approximation:** Reduces the computational burden and improves $p$-value resolution by fitting a generalized gamma distribution to the permutation null.
+- **100% Client-Side Privacy:** No data is uploaded to any server. All statistical computations are performed locally within your web browser.
+- **Interactive Visualization:** Offers fully interactive enrichment plots. Hovering over or clicking specific segments reveals individual genes and their rank metrics. Click the arrow to quickly jump to the pathway database.
 
 ## Quick Start
 
@@ -33,9 +33,9 @@ You only need two files to run the analysis. Simply drag and drop them into the 
 Rows represent genes, and columns represent samples. The first column must contain gene symbols.
 | Gene | Case_1 | Case_2 | ... | Ctrl_1 | Ctrl_2 |
 |:---:|:---:|:---:|:---:|:---:|:---:|
-| TP53 | 12.5 | 11.2 | ... | 8.4 | 9.1 |
+| TP53 | 2.5 | 1.2 | ... | 4.4 | 2.1 |
 | EGFR | 4.2 | 5.1 | ... | 4.0 | 4.3 |
-| MYC | 8.8 | 9.3 | ... | 8.5 | 8.9 |
+| MYC | 4.8 | 5.3 | ... | 3.5 | 4.9 |
 
 **Gene Sets (`.gmt` or `.txt`)**: 
 Standard MSigDB format. Each row represents a pathway: `Name`, `URL/Description`, followed by `Gene symbols`.
@@ -60,14 +60,14 @@ The software provides dynamic, real-time results directly in the browser:
 
 ### Results Table
 The output table is sortable and includes the following key metrics:
-- **NES / NES-AD:** Normalized Enrichment Scores for KS and AD statistics.
+- **NES / NES-AD:** Normalized Enrichment Scores based on KS and AD statistics.
 - **p<sub>KS</sub> / p<sub>AD</sub>:** Significance levels for the KS and AD statistics.
 - **p<sub>Cauchy</sub>:** The aggregated omnibus $p$-value via the Cauchy combination test.
 - **FDR<sub>KS</sub> / FDR<sub>AD</sub>:** False Discovery Rates based on the normalized enrichment scores.
 
 ### Visualizations
 - **Interactive Enrichment Walk Plot:** Visualizes the running sum, peak/integral positions, and individual gene hits. Supports zooming, panning, and high-resolution PNG export.
-- **NES Bar Chart:** Automatically generated when analyzing > 10 pathways to provide a macro-level overview of pathway activation/suppression directions.
+- **NES Bar Chart:** Automatically generated when analyzing > 10 pathways to provide an overview of pathway activation/suppression directions.
 
 ## Citation
 
@@ -83,6 +83,6 @@ If you use inGSEA in your research, please cite:
 
 The inGSEA source code is released under the [MIT License](LICENSE). 
 
-*Disclaimer: GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for academic use; commercial use requires a separate agreement with the Broad Institute of MIT and Harvard).*
+*GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for academic use; commercial use requires a separate agreement with the Broad Institute of MIT and Harvard).*
 
 For questions, feature requests, or bug reports, please [open an issue](https://github.com/amss-stat/inGSEA/issues) or contact [liqz@amss.ac.cn](mailto:liqz@amss.ac.cn).
