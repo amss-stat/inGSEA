@@ -1,116 +1,88 @@
-https://amss-stat.github.io/inGSEA/
+# inGSEA: Improved Gene Set Enrichment Analysis Using a Weighted Integral Statistic
 
-# inGSEA — Improved Gene Set Enrichment Analysis Using a Weighted Integral Statistic
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)]()
+[![Web Application](https://img.shields.io/badge/Web_App-Live-success.svg)](https://amss-stat.github.io/inGSEA/)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)]()
+Gene Set Enrichment Analysis (GSEA) is one of the most popular methods for transcriptomic analysis, yet its statistical power is limited when biological pathways exhibit heterogeneous, sparse, or non-concordant (bidirectional) expression patterns. 
 
-A web-based implementation of the inGSEA framework, which extends classical
-Gene Set Enrichment Analysis with an Anderson-Darling enrichment score and
-Cauchy combination test for improved statistical power and robustness.
+**inGSEA (integral-based GSEA)** is a powerful and robust extension of the classical GSEA framework. It introduces a novel enrichment score based on the **Anderson-Darling (AD) weighted integral statistic** and aggregates it with the classic Kolmogorov-Smirnov (KS) statistic via a **Cauchy combination test**. To overcome the computational bottlenecks of permutation testing, inGSEA utilizes a **generalized gamma distribution** to approximate the empirical null. 
 
----
+The tool is accessible as a highly optimized, user-friendly, and privacy-preserving web-based software:  
+🌐 **[Launch inGSEA Web Application](https://amss-stat.github.io/inGSEA/)**
 
-## Overview
+## Key Features
 
-Standard GSEA has limited power when pathways exhibit heterogeneous or
-non-concordant expression patterns. inGSEA addresses this by:
+- **Anderson-Darling (AD) Enrichment Score:** Integrates squared deviations over the entire distribution with heavy tail-weighting. This substantially enhances detection power for complex signals, particularly sparse and bidirectional expression patterns missed by standard GSEA.
+- **Robust Cauchy Combination:** Aggregates KS and AD statistics to provide robust sensitivity across diverse enrichment scenarios, balancing their complementary strengths.
+- **Fast Generalized Gamma Approximation:** Dramatically reduces the computational burden and improves $p$-value resolution by fitting a generalized gamma distribution to the permutation null, eliminating the need for millions of permutations.
+- **100% Client-Side Privacy:** No data is uploaded to any server. All statistical computations are performed locally within your web browser, ensuring complete confidentiality for sensitive clinical or proprietary genomic data.
+- **Interactive Visualization:** Offers fully interactive enrichment plots. Hovering over or clicking specific segments reveals individual genes and their rank metrics, bridging the gap between statistical significance and biological interpretation.
 
-- Adopting an **Anderson-Darling (AD) enrichment score** that
-  enhances detection of complex signals, paticularly sparse and bidirectional ones
-- Combining AD and KS tests via a **Cauchy combination test** for
-  robustness across diverse expression patterns
-- Approximating permutation null distributions with a **generalised gamma
-  distribution**, substantially reducing computational cost
+## Quick Start
 
-All computation runs entirely in the browser — no data is uploaded to any
-server.
+### 1. Launch the Tool
+Visit **[https://amss-stat.github.io/inGSEA/](https://amss-stat.github.io/inGSEA/)** (Google Chrome is strongly recommended for optimal JavaScript engine performance).
 
----
+*Tip: You can click the **"⚡ Load Demo Dataset"** button on the homepage to instantly try inGSEA with synthetic data.*
 
-## Live Demo
+### 2. Input Data Formats
+You only need two files to run the analysis. Simply drag and drop them into the designated zones.
 
-[**Launch inGSEA →**](https://amss-stat.github.io/inGSEA)
+**Expression Matrix (`.csv`, `.tsv`, or `.txt`)**: 
+Rows represent genes, and columns represent samples. The first column must contain gene symbols.
+| Gene | Case_1 | Case_2 | ... | Ctrl_1 | Ctrl_2 |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| TP53 | 12.5 | 11.2 | ... | 8.4 | 9.1 |
+| EGFR | 4.2 | 5.1 | ... | 4.0 | 4.3 |
+| MYC | 8.8 | 9.3 | ... | 8.5 | 8.9 |
 
-A built-in demo dataset (200 genes × 20 samples, 3 synthetic pathways) is
-available via the **⚡ Load demo dataset** button.
+**Gene Sets (`.gmt` or `.txt`)**: 
+Standard MSigDB format. Each row represents a pathway: `Name`, `URL/Description`, followed by `Gene symbols`.
+| Pathway Name | URL | Gene 1 | Gene 2 | Gene 3 | ... |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| HALLMARK_P53_PATHWAY | http://... | TP53 | BAX | CDKN1A | ... |
+| HALLMARK_HYPOXIA | http://... | HIF1A | VEGFA | PGK1 | ... |
 
----
+*Note: GMT files can be downloaded directly from the [MSigDB Collections](https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp).*
 
-## Usage
+### 3. Run the Analysis
+1. Define the number of **Case samples** (assuming the first $N$ columns are cases, and the rest are controls).
+2. Configure **Permutations** (e.g., 1000) and **Weight exponent $p$** (default: 1).
+3. Select the **Statistical engine**:
+   - *Parametric Approximation* (Recommended): Uses generalized gamma null fit for speed and high-resolution $p$-values.
+   - *Permutation only*: Calculates empirical $p$-values strictly based on permutations.
+4. Click **▶ Run inGSEA**.
 
-### Input files
+## Output & Interpretation
 
-| File | Format | Description |
-|------|--------|-------------|
-| Expression matrix | CSV or TSV | Rows = genes, columns = samples |
-| Gene sets | GMT | MSigDB format (name · URL · genes) |
+The software provides dynamic, real-time results directly in the browser:
 
-GMT files can be downloaded from
-[MSigDB Collections](https://www.gsea-msigdb.org/gsea/msigdb/collections.jsp)
-(free registration required).
+### Results Table
+The output table is sortable and includes the following key metrics:
+- **NES / NES-AD:** Normalized Enrichment Scores for KS and AD statistics.
+- **p<sub>KS</sub> / p<sub>AD</sub>:** Significance levels for the KS and AD statistics.
+- **p<sub>Cauchy</sub>:** The aggregated omnibus $p$-value via the Cauchy combination test.
+- **FDR<sub>KS</sub> / FDR<sub>AD</sub>:** Isotonically corrected Benjamini-Hochberg False Discovery Rates, providing strict control for multiple testing globally.
 
-### Steps
+### Visualizations
+- **Interactive Enrichment Walk Plot:** Visualizes the running sum, peak/integral positions, and individual gene hits. Supports zooming, panning, and high-resolution PNG export.
+- **NES Bar Chart:** Automatically generated when analyzing > 10 pathways to provide a macro-level overview of pathway activation/suppression directions.
 
-1. Drop your expression matrix into the **Expression Matrix** zone
-2. Drop a GMT file into the **Gene Sets** zone
-3. Set the number of **case samples** (first *N* columns)
-4. Adjust permutations, weight exponent, and pathway selection as needed
-5. Choose a **statistical engine**:
-   - *Parametric Approximation* — generalised gamma null fit (faster)
-   - *Permutation only* — empirical p-values only
-6. Click **▶ Run inGSEA**
+## Citation
 
-### Output
+If you use inGSEA in your research, please cite:
 
-- Sortable results table with NES, NES-AD, p-values, and FDR values
-- Interactive enrichment plot (zoom, pan, hover)
-- NES bar chart overview (when > 10 pathways)
-- CSV export and PNG export of enrichment curves
+> Zhang, Q., & Li, Q. (2026). *inGSEA: An Improved Method for Gene Set Enrichment Analysis Using a Weighted Integral Statistic.* bioRxiv. doi: [https://doi.org/10.64898/2026.06.02.729106](https://doi.org/10.64898/2026.06.02.729106)
 
----
+**References for original methodologies:**
+1. Subramanian A, *et al.* (2005). Gene set enrichment analysis: a knowledge-based approach for interpreting genome-wide expression profiles. *PNAS*, 102(43), 15545–15550.
+2. Liberzon A, *et al.* (2015). The Molecular Signatures Database (MSigDB) hallmark gene set collection. *Cell Systems*, 1(6), 417–425.
 
-## Methods Summary
+## License & Contact
 
-| Component | Description |
-|-----------|-------------|
-| Ranking metric | Welch signal-to-noise ratio |
-| KS enrichment score | Weighted running sum (weight exponent *p*, default 1) |
-| AD enrichment score | Integral of squared running sum over rank fractions |
-| Null approximation | Generalised gamma MLE fit to permutation null |
-| p-value combination | Cauchy combination test |
-| Multiple testing | Benjamini-Hochberg FDR |
+The inGSEA source code is released under the [MIT License](LICENSE). 
 
----
+*Disclaimer: GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for academic use; commercial use requires a separate agreement with the Broad Institute of MIT and Harvard).*
 
-## Browser Compatibility
-
-Chrome is strongly recommended for best performance.
-
----
-
-## References
-
-1. Zhang, Q., & Li, Q. (2026). A rotated multivariate linear mixed model for dual large-scale genome-wide association study. *bioRxiv*, doi: https://doi.org/10.64898/2026.06.02.729106.
-2. Mootha VK, *et al.* (2003). PGC-1α-responsive genes involved in oxidative phosphorylation are coordinately downregulated in human diabetes. *Nature Genetics*, 34(3), 267–273.
-3. Subramanian A, *et al.* (2005). Gene set enrichment analysis: a knowledge-based approach for interpreting genome-wide expression profiles. *PNAS*, 102(43), 15545–15550.
-4. Liberzon A, Subramanian A, Pinchback R, Thorvaldsdóttir H, Tamayo P & Mesirov JP (2011). Molecular Signatures Database (MSigDB) 3.0. *Bioinformatics*, 27(12), 1739–1740.
-5. Liberzon A, *et al.* (2015). The Molecular Signatures Database (MSigDB) hallmark gene set collection. *Cell Systems*, 1(6), 417–425.
-
----
-
-## License
-
-The inGSEA source code is released under the
-[MIT License](LICENSE).
-
-GMT files from MSigDB are subject to their own terms of use (CC BY 4.0 for
-academic use; commercial use requires a separate agreement with the Broad
-Institute of MIT and Harvard).
-
----
-
-## Contact
-
-For questions or bug reports, please open an issue on
-[GitHub](https://github.com/amss-stat/inGSEA/issues).
+For questions, feature requests, or bug reports, please [open an issue](https://github.com/amss-stat/inGSEA/issues) or contact [liqz@amss.ac.cn](mailto:liqz@amss.ac.cn).
