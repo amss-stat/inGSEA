@@ -155,15 +155,6 @@
     </div>
   </div>
 
-  <div class="sec sec-demo">
-    <div class="sec-lbl">Quick Start</div>
-    <button class="btn-secondary full" id="btn-demo">⚡ Load demo dataset</button>
-    <p class="demo-note">
-      200 genes · 20 samples (10/10)<br>
-      3 synthetic pathways (up / down / mixed)
-    </p>
-  </div>
-
   <div class="sec sec-log">
     <div class="sec-lbl">Log</div>
     <div class="log" id="log" aria-live="polite"></div>
@@ -189,6 +180,15 @@
       configure parameters, then press <strong>Run inGSEA</strong>.<br><br>
       All computation is local — no data leaves your browser.
     </p>
+
+    <!-- NEW: Prominent Demo Section -->
+    <div class="empty-action">
+      <button class="btn-demo-large" id="btn-demo">⚡ Load Demo Dataset</button>
+      <p class="demo-note-center">
+        Try inGSEA instantly with synthetic data<br>
+        <span class="hint-sub">200 genes · 20 samples (10/10) · 3 pathways</span>
+      </p>
+    </div>
   </div>
 
   <div id="res-panel" style="display:none">
@@ -208,9 +208,9 @@
 
     <!-- FDR note: shown when >10 pathways -->
     <div class="fdr-note" id="fdr-note" style="display:none">
-      <strong>FDR note:</strong> FDR values can be large (&gt;0.5)
+      <strong>FDR note:</strong> BH-adjusted q-values can be large (&gt;0.5)
       when most pathways are null — this is expected and statistically correct.
-      A recommended threshold is 0.25.
+      FDR control is stringent with many pathways tested simultaneously.
     </div>
 
     <div class="tbl-wrap">
