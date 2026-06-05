@@ -6,19 +6,16 @@
 import { msigdbUrl } from './fileio.js';
 
 const COLS = [
-  { id:'rank',     hdr:'#',                            extra:false, sort:false },
-  { id:'name',     hdr:'Pathway',                      extra:false, sort:true  },
-  { id:'size',     hdr:'Size',                         extra:false, sort:true  },
-  { id:'nes',      hdr:'NES',                          extra:false, sort:true  },
-  { id:'nes_ad',   hdr:'NES-AD',                       extra:false, sort:true  },
-  { id:'pKS',      hdr:'p<sub>KS</sub>',               extra:false, sort:true  },
-  { id:'pAD',      hdr:'p<sub>AD</sub>',               extra:false, sort:true  },
-  { id:'pCauchy',  hdr:'p<sub>Cauchy</sub>',           extra:false, sort:true  },
-  // Extended columns
-  { id:'fdr_ks',   hdr:'FDR<sub>KS</sub>',             extra:true,  sort:true  },
-  { id:'fdr_ad',   hdr:'FDR<sub>AD</sub>',             extra:true,  sort:true  }, 
-  { id:'pAD_emp',  hdr:'p<sub>AD</sub>&nbsp;(perm)',   extra:true,  sort:true  },
-  { id:'pAD_par',  hdr:'p<sub>AD</sub>&nbsp;(par)',    extra:true,  sort:true  },
+  { id:'rank',     hdr:'#',                            sort:false },
+  { id:'name',     hdr:'Pathway',                      sort:true  },
+  { id:'size',     hdr:'Size',                         sort:true  },
+  { id:'nes',      hdr:'NES',                          sort:true  },
+  { id:'nes_ad',   hdr:'NES-AD',                       sort:true  },
+  { id:'pKS',      hdr:'p<sub>KS</sub>',               sort:true  },
+  { id:'pAD',      hdr:'p<sub>AD</sub>',               sort:true  }, // Dynamic
+  { id:'pCauchy',  hdr:'<strong>p<sub>Cauchy</sub></strong>', sort:true  },
+  { id:'fdr_ks',   hdr:'FDR<sub>KS</sub>',             sort:true  },
+  { id:'fdr_ad',   hdr:'<strong>FDR<sub>AD</sub></strong>', sort:true  }
 ];
 
 let _sortCol = 'pCauchy';
@@ -34,18 +31,16 @@ export function renderTable(results, showFDR, engine, onSelect) {
 function _buildHead(engine) {
   const isPar = engine === 'parametric';
   const over  = {
-    pKS: 'p<sub>KS</sub>&thinsp;<small>(perm)</small>',
     pAD: isPar
-      ? 'p<sub>AD</sub>&thinsp;<small>(par)</small>'
-      : 'p<sub>AD</sub>',
+      ? '<strong>p<sub>AD</sub>&thinsp;<small>(par)</small></strong>'
+      : '<strong>p<sub>AD</sub>&thinsp;<small>(perm)</small></strong>'
   };
 
   const ths = COLS.map(c => {
     const lbl = over[c.id] ?? c.hdr;
-    const xc  = c.extra  ? 'col-ext' : '';
     const sc  = c.sort   ? 'sortable' : '';
     const ar  = c.sort   ? '<span class="si"></span>' : '';
-    return `<th class="${xc} ${sc}" data-col="${c.id}">${lbl}${ar}</th>`;
+    return `<th class="${sc}" data-col="${c.id}">${lbl}${ar}</th>`;
   });
 
   document.getElementById('rt-head').innerHTML =
@@ -117,14 +112,8 @@ function _cell(id, r, rank, url) {
     case 'nes':
       return `<td class="num ${r.nes >= 0 ? 'pos' : 'neg'}">${r.nes.toFixed(3)}</td>`;
 
-    case 'fdr_ks':
-      return `<td class="fv ${fc(r.fdr_ks)}">${fp(r.fdr_ks)}</td>`;
-
     case 'nes_ad':
       return `<td class="num neu">${r.nes_ad.toFixed(3)}</td>`;
-
-    case 'fdr_ad':
-      return `<td class="fv ${fc(r.fdr_ad)}">${fp(r.fdr_ad)}</td>`;
 
     case 'pKS':
       return `<td class="pv ${pc(r.pKS)}">${fp(r.pKS)}</td>`;
@@ -135,19 +124,11 @@ function _cell(id, r, rank, url) {
     case 'pCauchy':
       return `<td class="pv ${pc(r.pCauchy)}">${fp(r.pCauchy)}</td>`;
 
-    case 'fdr':
-      return `<td class="fv col-ext ${r.fdr != null && r.fdr < 0.05 ? 'fsig' : ''}">
-        ${fp(r.fdr)}
-      </td>`;
+    case 'fdr_ks':
+      return `<td class="fv ${fc(r.fdr_ks)}">${fp(r.fdr_ks)}</td>`;
 
-    case 'pKS_emp':
-      return `<td class="pv col-ext ${pc(r.pKS_emp)}">${fp(r.pKS_emp)}</td>`;
-
-    case 'pAD_emp':
-      return `<td class="pv col-ext ${pc(r.pAD_emp)}">${fp(r.pAD_emp)}</td>`;
-
-    case 'pAD_par':
-      return `<td class="pv col-ext ${pc(r.pAD_par)}">${fp(r.pAD_par)}</td>`;
+    case 'fdr_ad':
+      return `<td class="fv ${fc(r.fdr_ad)}">${fp(r.fdr_ad)}</td>`;
 
     default:
       return '<td></td>';
@@ -174,20 +155,22 @@ function _sorted(results) {
     name:    r => r.name,
     size:    r => r.size,
     nes:     r => r.nes,
-    fdr_ks:  r => r.fdr_ks ?? 1,
     nes_ad:  r => r.nes_ad,
-    fdr_ad:  r => r.fdr_ad ?? 1,
     pKS:     r => r.pKS,
     pAD:     r => r.pAD,
     pCauchy: r => r.pCauchy,
-    fdr:     r => r.fdr ?? 1,
-    pKS_emp: r => r.pKS_emp,
-    pAD_emp: r => r.pAD_emp,
-    pAD_par: r => r.pAD_par ?? 1,
+    fdr_ks:  r => r.fdr_ks ?? 1,
+    fdr_ad:  r => r.fdr_ad ?? 1,
   }[_sortCol] ?? (r => r.pCauchy);
 
   return [...results].sort((a, b) => {
     const av = key(a), bv = key(b);
+    
+    // Safety net for null/undefined items
+    if (av == null && bv != null) return 1;
+    if (bv == null && av != null) return -1;
+    if (av == null && bv == null) return 0;
+
     return typeof av === 'string'
       ? _sortDir * av.localeCompare(bv)
       : _sortDir * (av - bv);
